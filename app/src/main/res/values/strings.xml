@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Hisab</string>
+    <string name="app_tagline">Store Revenue &amp; Profit Calculator</string>
+    <string name="tab_register">Quick Sale</string>
+    <string name="tab_records">Sales Log</string>
+    <string name="tab_analytics">Analytics</string>
+    <string name="tab_settings">Settings</string>
+    <string name="enter_sale">Record Sale</string>
+    <string name="field_title">Item Title / Product</string>
+    <string name="field_price">Selling Price</string>
+    <string name="field_cost">Item Cost</string>
+    <string name="profit">Net Profit</string>
+    <string name="margin">Profit Margin</string>
+    <string name="today_revenue">Today Revenue</string>
+    <string name="today_profit">Today Profit</string>
+</resources>

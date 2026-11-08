@@ -1,0 +1,6 @@
+{
+  "name": "Hisab",
+  "description": "High-speed store revenue calculator and profit analytics app for small business owners with instant margin calculations, PIN & biometric security, and offline import/export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
