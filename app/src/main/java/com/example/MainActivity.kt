@@ -35,17 +35,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Analytics
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PointOfSale
 import androidx.compose.material.icons.outlined.ReceiptLong
-import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -57,8 +53,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -116,12 +110,15 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val isUnlocked by viewModel.isUnlocked.collectAsStateWithLifecycle()
                 val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
+                val storeName by viewModel.storeName.collectAsStateWithLifecycle()
+                val dailyTargetProfit by viewModel.dailyTargetProfit.collectAsStateWithLifecycle()
                 val todaySummary by viewModel.todaySummary.collectAsStateWithLifecycle()
                 val allSales by viewModel.allSales.collectAsStateWithLifecycle()
                 val recentTitles by viewModel.recentTitles.collectAsStateWithLifecycle()
                 val filteredSales by viewModel.filteredSales.collectAsStateWithLifecycle()
                 val timeFilter by viewModel.timeFilter.collectAsStateWithLifecycle()
                 val marginFilter by viewModel.marginFilter.collectAsStateWithLifecycle()
+                val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
                 val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
                 val selectedSpecificDateMillis by viewModel.selectedSpecificDateMillis.collectAsStateWithLifecycle()
                 val analyticsReport by viewModel.currentAnalyticsReport.collectAsStateWithLifecycle()
@@ -139,20 +136,23 @@ class MainActivity : ComponentActivity() {
 
                 // If locked, show full-screen PinLockScreen
                 if (!isUnlocked) {
-                    // Try triggering biometric prompt immediately if enabled
+                    // Try triggering biometric prompt if enabled
                     LaunchedEffect(Unit) {
                         viewModel.triggerBiometricAuth(this@MainActivity)
                     }
 
                     PinLockScreen(
                         title = "Hisab Security",
-                        subtitle = "Enter PIN to access your store financial records",
-                        showBiometricButton = viewModel.securityManager.isBiometricEnabled() && viewModel.securityManager.canUseBiometrics(),
+                        subtitle = "Enter 4-digit PIN to access store sales",
+                        showBiometricButton = viewModel.securityManager.isBiometricEnabled(),
                         onPinComplete = { pin ->
                             viewModel.unlockWithPin(pin)
                         },
                         onBiometricClick = {
                             viewModel.triggerBiometricAuth(this@MainActivity)
+                        },
+                        onForgotPin = {
+                            viewModel.resetPinSecurity()
                         }
                     )
                 } else {
@@ -167,6 +167,7 @@ class MainActivity : ComponentActivity() {
                         topBar = {
                             HisabTopBar(
                                 currentTab = currentTab,
+                                storeName = storeName,
                                 isPinEnabled = viewModel.securityManager.isPinEnabled(),
                                 onLockClick = { viewModel.lockApp() }
                             )
@@ -205,8 +206,13 @@ class MainActivity : ComponentActivity() {
                                             recentSales = allSales,
                                             recentTitles = recentTitles,
                                             currencySymbol = currencySymbol,
+                                            storeName = storeName,
+                                            dailyTargetProfit = dailyTargetProfit,
                                             onRecordSale = { title, price, cost, quantity ->
                                                 viewModel.recordSale(title, price, cost, quantity)
+                                            },
+                                            onDuplicateSale = { sale ->
+                                                viewModel.duplicateSale(sale)
                                             },
                                             onDeleteSale = { sale ->
                                                 viewModel.deleteSale(sale)
@@ -222,13 +228,16 @@ class MainActivity : ComponentActivity() {
                                             sales = filteredSales,
                                             timeFilter = timeFilter,
                                             marginFilter = marginFilter,
+                                            sortOrder = sortOrder,
                                             searchQuery = searchQuery,
                                             selectedSpecificDateMillis = selectedSpecificDateMillis,
                                             currencySymbol = currencySymbol,
                                             onTimeFilterChange = { viewModel.setTimeFilter(it) },
                                             onMarginFilterChange = { viewModel.setMarginFilter(it) },
+                                            onSortOrderChange = { viewModel.setSortOrder(it) },
                                             onSearchQueryChange = { viewModel.setSearchQuery(it) },
                                             onSelectSpecificDate = { viewModel.setSelectedSpecificDate(it) },
+                                            onDuplicateSale = { viewModel.duplicateSale(it) },
                                             onUpdateSale = { viewModel.updateSale(it) },
                                             onDeleteSale = { viewModel.deleteSale(it) }
                                         )
@@ -249,10 +258,15 @@ class MainActivity : ComponentActivity() {
                                             isBiometricEnabled = viewModel.securityManager.isBiometricEnabled(),
                                             canUseBiometrics = viewModel.securityManager.canUseBiometrics(),
                                             currentCurrency = currencySymbol,
+                                            storeName = storeName,
+                                            dailyTargetProfit = dailyTargetProfit,
                                             onSetupPin = { viewModel.setupNewPin(it) },
                                             onDisablePin = { viewModel.removePinSecurity() },
                                             onToggleBiometric = { viewModel.setBiometricEnabled(it) },
                                             onSelectCurrency = { viewModel.setCurrency(it) },
+                                            onUpdateStoreName = { viewModel.setStoreName(it) },
+                                            onUpdateDailyTarget = { viewModel.setDailyTarget(it) },
+                                            onTestBiometrics = { viewModel.triggerBiometricAuth(this@MainActivity) },
                                             onExportCsv = { viewModel.exportDataCsv() },
                                             onExportJson = { viewModel.exportDataJson() },
                                             onImportCsv = { raw -> viewModel.importCsv(raw) {} },
@@ -274,6 +288,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HisabTopBar(
     currentTab: AppTab,
+    storeName: String = "My Store",
     isPinEnabled: Boolean,
     onLockClick: () -> Unit
 ) {
@@ -293,8 +308,8 @@ fun HisabTopBar(
                 // App Emblem
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(BrandDark),
                     contentAlignment = Alignment.Center
                 ) {
@@ -302,7 +317,7 @@ fun HisabTopBar(
                         imageVector = Icons.AutoMirrored.Filled.TrendingUp,
                         contentDescription = null,
                         tint = ProfitEmerald,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(10.dp))
@@ -330,7 +345,7 @@ fun HisabTopBar(
                         }
                     }
                     Text(
-                        text = currentTab.label,
+                        text = "$storeName • ${currentTab.label}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = TextSecondary

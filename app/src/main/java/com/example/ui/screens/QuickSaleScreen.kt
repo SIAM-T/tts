@@ -1,8 +1,14 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,12 +33,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,6 +50,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +87,7 @@ import com.example.ui.theme.SurfaceWhite
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -90,16 +98,21 @@ fun QuickSaleScreen(
     recentSales: List<SaleEntity>,
     recentTitles: List<String>,
     currencySymbol: String,
+    storeName: String = "My Store",
+    dailyTargetProfit: Double = 100.0,
     onRecordSale: (title: String, price: Double, cost: Double, quantity: Int) -> Unit,
+    onDuplicateSale: (SaleEntity) -> Unit,
     onDeleteSale: (SaleEntity) -> Unit,
     onNavigateToLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var title by remember { mutableStateOf("") }
     var priceText by remember { mutableStateOf("") }
     var costText by remember { mutableStateOf("") }
     var quantity by remember { mutableIntStateOf(1) }
-    var showSuccessFeedback by remember { mutableStateOf(false) }
+    var lastRecordedProfit by remember { mutableDoubleStateOf(0.0) }
+    var showSuccessToast by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -107,20 +120,43 @@ fun QuickSaleScreen(
     val parsedPrice = priceText.toDoubleOrNull() ?: 0.0
     val parsedCost = costText.toDoubleOrNull() ?: 0.0
 
+    fun vibrate() {
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(35, 100))
+            }
+        } catch (_: Exception) { }
+    }
+
     fun submitSale() {
         if (parsedPrice > 0.0 || parsedCost > 0.0) {
+            vibrate()
+            val net = (parsedPrice - parsedCost) * quantity
+            lastRecordedProfit = net
+            showSuccessToast = true
+
             onRecordSale(
                 if (title.isBlank()) "Quick Item" else title,
                 parsedPrice,
                 parsedCost,
                 quantity
             )
+
+            // Reset form for next customer
             title = ""
             priceText = ""
             costText = ""
             quantity = 1
             focusManager.clearFocus()
-            showSuccessFeedback = true
+        }
+    }
+
+    // Auto dismiss success toast after 3.5 seconds
+    LaunchedEffect(showSuccessToast) {
+        if (showSuccessToast) {
+            delay(3500)
+            showSuccessToast = false
         }
     }
 
@@ -135,20 +171,70 @@ fun QuickSaleScreen(
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // 1. Live Daily Earnings Summary Header
+            // 1. Store Greeting & Today's Live Earnings Summary Header
             DailyEarningsSummaryHeader(
                 summary = todaySummary,
                 currencySymbol = currencySymbol,
+                storeName = storeName,
+                dailyTargetProfit = dailyTargetProfit,
                 modifier = Modifier.testTag("today_earnings_header")
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            // Success animated notification banner
+            AnimatedVisibility(
+                visible = showSuccessToast,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFECFDF5))
+                        .border(1.2.dp, Color(0xFFA7F3D0), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = ProfitEmerald,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sale Recorded Successfully!",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF065F46)
+                            )
+                        }
+                        Text(
+                            text = "+$currencySymbol${String.format(Locale.US, "%.2f", lastRecordedProfit)}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ProfitEmerald
+                        )
+                    }
+                }
+            }
 
-            // 2. Main 3-Field Quick Sale Card
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 2. Main 3-Field Quick Sale Entry Card
             Card(
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-                border = CardDefaults.outlinedCardBorder().copy(width = 1.2.dp, brush = androidx.compose.ui.graphics.SolidColor(BorderSubtle)),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    width = 1.2.dp,
+                    brush = androidx.compose.ui.graphics.SolidColor(BorderSubtle)
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("quick_sale_card")
@@ -162,7 +248,7 @@ fun QuickSaleScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
                                     .background(ProfitEmerald.copy(alpha = 0.12f)),
                                 contentAlignment = Alignment.Center
@@ -175,25 +261,33 @@ fun QuickSaleScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "New Sale Entry",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
+                            Column {
+                                Text(
+                                    text = "3-Field Sale Entry",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "Auto-calculates profit & margin",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
                         }
 
-                        // Quantity selector
+                        // Quantity Selector Pill
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(SurfaceSubtle)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 text = "Qty: ",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = TextSecondary,
                                 fontWeight = FontWeight.Medium
                             )
@@ -203,7 +297,7 @@ fun QuickSaleScreen(
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Box(
                                 modifier = Modifier
                                     .size(24.dp)
@@ -234,8 +328,8 @@ fun QuickSaleScreen(
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
-                        label = { Text("Item Title / Product Name") },
-                        placeholder = { Text("e.g. Wireless Mouse, T-Shirt, Coffee") },
+                        label = { Text("1. Item Title / Product Name") },
+                        placeholder = { Text("e.g. Wireless Mouse, Cotton Shirt, Milk") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Words,
@@ -256,38 +350,39 @@ fun QuickSaleScreen(
                             .testTag("input_title")
                     )
 
-                    // Recent title suggestion chips
-                    if (recentTitles.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            recentTitles.take(5).forEach { recent ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(SurfaceSubtle)
-                                        .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
-                                        .clickable { title = recent }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = recent,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = TextSecondary
-                                    )
-                                }
+                    // Quick category / suggestion pills
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val quickPresets = listOf("General Item", "Grocery", "Electronics", "Snacks", "Clothing", "Service")
+                        val displayChips = (recentTitles.take(3) + quickPresets).distinct().take(6)
+
+                        displayChips.forEach { chipText ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(SurfaceSubtle)
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                                    .clickable { title = chipText }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = chipText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextSecondary
+                                )
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Field 2 & 3: Selling Price & Cost Price side-by-side
+                    // Field 2 & 3: Selling Price & Item Cost
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -296,7 +391,7 @@ fun QuickSaleScreen(
                         OutlinedTextField(
                             value = priceText,
                             onValueChange = { priceText = it },
-                            label = { Text("Selling Price ($currencySymbol)") },
+                            label = { Text("2. Price ($currencySymbol)") },
                             placeholder = { Text("0.00") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(
@@ -322,7 +417,7 @@ fun QuickSaleScreen(
                         OutlinedTextField(
                             value = costText,
                             onValueChange = { costText = it },
-                            label = { Text("Item Cost ($currencySymbol)") },
+                            label = { Text("3. Cost ($currencySymbol)") },
                             placeholder = { Text("0.00") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(
@@ -343,6 +438,50 @@ fun QuickSaleScreen(
                                 .weight(1f)
                                 .testTag("input_cost")
                         )
+                    }
+
+                    // Smart Markup Helper Chips (When cost is entered, tap to auto-set price!)
+                    if (parsedCost > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Auto-Markup: ",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextMuted
+                            )
+                            // +30%
+                            MarkupPresetChip("+30%") {
+                                val newP = parsedCost * 1.30
+                                priceText = String.format(Locale.US, "%.2f", newP)
+                            }
+                            // +50%
+                            MarkupPresetChip("+50%") {
+                                val newP = parsedCost * 1.50
+                                priceText = String.format(Locale.US, "%.2f", newP)
+                            }
+                            // 2x Markup
+                            MarkupPresetChip("2x (100%)") {
+                                val newP = parsedCost * 2.0
+                                priceText = String.format(Locale.US, "%.2f", newP)
+                            }
+                            // +$5
+                            MarkupPresetChip("+$5") {
+                                val newP = parsedCost + 5.0
+                                priceText = String.format(Locale.US, "%.2f", newP)
+                            }
+                            // +$10
+                            MarkupPresetChip("+$10") {
+                                val newP = parsedCost + 10.0
+                                priceText = String.format(Locale.US, "%.2f", newP)
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -488,6 +627,7 @@ fun QuickSaleScreen(
                         QuickSaleItemRow(
                             sale = sale,
                             currencySymbol = currencySymbol,
+                            onDuplicate = { onDuplicateSale(sale) },
                             onDelete = { onDeleteSale(sale) }
                         )
                     }
@@ -500,9 +640,32 @@ fun QuickSaleScreen(
 }
 
 @Composable
+private fun MarkupPresetChip(
+    label: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFEFF6FF))
+            .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = RevenueSapphire
+        )
+    }
+}
+
+@Composable
 private fun QuickSaleItemRow(
     sale: SaleEntity,
     currencySymbol: String,
+    onDuplicate: () -> Unit,
     onDelete: () -> Unit
 ) {
     val sdf = remember { SimpleDateFormat("hh:mm a", Locale.US) }
@@ -578,8 +741,22 @@ private fun QuickSaleItemRow(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
 
+                // Duplicate Button
+                IconButton(
+                    onClick = onDuplicate,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Duplicate Sale",
+                        tint = RevenueSapphire,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+
+                // Delete Button
                 IconButton(
                     onClick = onDelete,
                     modifier = Modifier.size(32.dp)
@@ -588,7 +765,7 @@ private fun QuickSaleItemRow(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Delete Sale",
                         tint = TextMuted,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }

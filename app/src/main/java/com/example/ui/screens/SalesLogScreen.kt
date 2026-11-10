@@ -24,21 +24,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -56,11 +57,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.SaleEntity
 import com.example.ui.MarginFilterTier
+import com.example.ui.SortOrder
 import com.example.ui.TimeFilter
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderSubtle
@@ -84,13 +85,16 @@ fun SalesLogScreen(
     sales: List<SaleEntity>,
     timeFilter: TimeFilter,
     marginFilter: MarginFilterTier,
+    sortOrder: SortOrder = SortOrder.NEWEST,
     searchQuery: String,
     selectedSpecificDateMillis: Long?,
     currencySymbol: String,
     onTimeFilterChange: (TimeFilter) -> Unit,
     onMarginFilterChange: (MarginFilterTier) -> Unit,
+    onSortOrderChange: (SortOrder) -> Unit = {},
     onSearchQueryChange: (String) -> Unit,
     onSelectSpecificDate: (Long?) -> Unit,
+    onDuplicateSale: (SaleEntity) -> Unit = {},
     onUpdateSale: (SaleEntity) -> Unit,
     onDeleteSale: (SaleEntity) -> Unit,
     modifier: Modifier = Modifier
@@ -98,6 +102,7 @@ fun SalesLogScreen(
     val context = LocalContext.current
     var editingSale by remember { mutableStateOf<SaleEntity?>(null) }
     var saleToDelete by remember { mutableStateOf<SaleEntity?>(null) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val sdfDateOnly = remember { SimpleDateFormat("MMM dd, yyyy", Locale.US) }
     val sdfDateTime = remember { SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.US) }
@@ -209,6 +214,48 @@ fun SalesLogScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+
+                // Sort Dropdown Button
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceWhite)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                            .clickable { showSortMenu = true }
+                            .testTag("sort_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sort,
+                            contentDescription = "Sort",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false }
+                    ) {
+                        SortOrder.entries.forEach { order ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = order.label,
+                                        fontWeight = if (sortOrder == order) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (sortOrder == order) RevenueSapphire else TextPrimary
+                                    )
+                                },
+                                onClick = {
+                                    onSortOrderChange(order)
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -317,7 +364,7 @@ fun SalesLogScreen(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(SurfaceWhite)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                    .border(1.2.dp, BorderSubtle, RoundedCornerShape(14.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
@@ -326,7 +373,7 @@ fun SalesLogScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("SALES", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                        Text("COUNT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextMuted)
                         Text("${sales.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                     }
                     Column {
@@ -386,6 +433,7 @@ fun SalesLogScreen(
                             sale = sale,
                             currencySymbol = currencySymbol,
                             dateTimeFormatted = sdfDateTime.format(Date(sale.timestamp)),
+                            onDuplicate = { onDuplicateSale(sale) },
                             onEdit = { editingSale = sale },
                             onDelete = { saleToDelete = sale }
                         )
@@ -439,6 +487,7 @@ private fun DetailedSaleCard(
     sale: SaleEntity,
     currencySymbol: String,
     dateTimeFormatted: String,
+    onDuplicate: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -536,13 +585,17 @@ private fun DetailedSaleCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Action row (Edit / Delete)
+            // Action row (Duplicate / Edit / Delete)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
+                IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
+                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = RevenueSapphire, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = RevenueSapphire, modifier = Modifier.size(16.dp))
+                    Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = TextPrimary, modifier = Modifier.size(16.dp))
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {

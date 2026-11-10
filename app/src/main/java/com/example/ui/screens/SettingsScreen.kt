@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -25,25 +26,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -58,13 +61,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.PinLockScreen
+import com.example.ui.components.PinSetupDialog
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.BrandDark
@@ -85,10 +86,15 @@ fun SettingsScreen(
     isBiometricEnabled: Boolean,
     canUseBiometrics: Boolean,
     currentCurrency: String,
+    storeName: String,
+    dailyTargetProfit: Double,
     onSetupPin: (String) -> Unit,
     onDisablePin: () -> Unit,
     onToggleBiometric: (Boolean) -> Unit,
     onSelectCurrency: (String) -> Unit,
+    onUpdateStoreName: (String) -> Unit,
+    onUpdateDailyTarget: (Double) -> Unit,
+    onTestBiometrics: () -> Unit,
     onExportCsv: suspend () -> String,
     onExportJson: suspend () -> String,
     onImportCsv: (String) -> Unit,
@@ -108,6 +114,12 @@ fun SettingsScreen(
     var showClearConfirmation by remember { mutableStateOf(false) }
     var showSeedConfirmation by remember { mutableStateOf(false) }
 
+    var editingStoreName by remember { mutableStateOf(storeName) }
+    var showStoreNameEdit by remember { mutableStateOf(false) }
+
+    var editingDailyTarget by remember { mutableStateOf(dailyTargetProfit.toInt().toString()) }
+    var showTargetEdit by remember { mutableStateOf(false) }
+
     fun shareText(title: String, content: String) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
@@ -115,13 +127,6 @@ fun SettingsScreen(
             putExtra(Intent.EXTRA_TEXT, content)
         }
         context.startActivity(Intent.createChooser(intent, "Export Store Data"))
-    }
-
-    fun copyToClipboard(label: String, content: String) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText(label, content)
-        clipboard.setPrimaryClip(clip)
-        Toast.makeText(context, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
     Box(
@@ -137,51 +142,93 @@ fun SettingsScreen(
         ) {
             // Header
             Text(
-                text = "Store Settings & Tools",
+                text = "Store Settings & Controls",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Security, offline data backup & currency",
+                text = "Security, store customization & offline backup",
                 fontSize = 13.sp,
                 color = TextSecondary
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 1. Currency Preference
-            SettingsSectionCard(title = "Currency Symbol") {
-                val currencies = listOf("$", "৳", "₹", "€", "£", "¥", "₱", "R$", "₦", "د.إ")
+            // 1. Store Profile & Goals
+            SettingsSectionCard(title = "Store Profile & Daily Goals") {
+                // Store Name Row
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    currencies.forEach { sym ->
-                        val isSelected = currentCurrency == sym
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) BrandDark else SurfaceSubtle)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) BrandDark else BorderSubtle,
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { onSelectCurrency(sym) },
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(RevenueSapphire.copy(alpha = 0.12f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = sym,
-                                fontSize = 16.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) SurfaceWhite else TextPrimary
+                            Icon(
+                                imageVector = Icons.Default.Store,
+                                contentDescription = null,
+                                tint = RevenueSapphire,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Store Name", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text(storeName, fontSize = 12.sp, color = TextSecondary)
+                        }
+                    }
+
+                    TextButton(onClick = {
+                        editingStoreName = storeName
+                        showStoreNameEdit = true
+                    }) {
+                        Text("Edit", fontSize = 12.sp, color = RevenueSapphire)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Daily Profit Target Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(ProfitEmerald.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Flag,
+                                contentDescription = null,
+                                tint = ProfitEmerald,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Daily Profit Target", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text("$currentCurrency${dailyTargetProfit.toInt()}/day target", fontSize = 12.sp, color = TextSecondary)
+                        }
+                    }
+
+                    TextButton(onClick = {
+                        editingDailyTarget = dailyTargetProfit.toInt().toString()
+                        showTargetEdit = true
+                    }) {
+                        Text("Change", fontSize = 12.sp, color = ProfitEmerald)
                     }
                 }
             }
@@ -189,7 +236,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 2. PIN & Biometric Security
-            SettingsSectionCard(title = "Security & Privacy") {
+            SettingsSectionCard(title = "Security & Biometrics") {
                 // PIN row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -214,13 +261,13 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "App PIN Lock",
+                                text = "App 4-Digit PIN",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
                             )
                             Text(
-                                text = if (isPinEnabled) "4-digit PIN is active" else "Protect app on launch",
+                                text = if (isPinEnabled) "PIN lock active on app launch" else "Protect app on startup",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -244,12 +291,18 @@ fun SettingsScreen(
                 }
 
                 if (isPinEnabled) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    TextButton(
-                        onClick = { showPinSetupDialog = true },
-                        modifier = Modifier.align(Alignment.End)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        Text("Change PIN", fontSize = 12.sp, color = RevenueSapphire)
+                        TextButton(onClick = { showPinSetupDialog = true }) {
+                            Text("Change PIN", fontSize = 12.sp, color = RevenueSapphire)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { onDisablePin() }) {
+                            Text("Turn Off", fontSize = 12.sp, color = LossRose)
+                        }
                     }
                 }
 
@@ -285,7 +338,7 @@ fun SettingsScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = if (canUseBiometrics) "Use Fingerprint or Face ID" else "Not supported on this hardware",
+                                text = if (canUseBiometrics) "Fingerprint / Face recognition" else "Hardware check ready",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -295,18 +348,69 @@ fun SettingsScreen(
                     Switch(
                         checked = isBiometricEnabled,
                         onCheckedChange = { onToggleBiometric(it) },
-                        enabled = isPinEnabled && canUseBiometrics,
+                        enabled = isPinEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = SurfaceWhite,
                             checkedTrackColor = ProfitEmerald
                         )
                     )
                 }
+
+                if (isBiometricEnabled) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onTestBiometrics,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceSubtle, contentColor = TextPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.Default.Fingerprint, contentDescription = null, tint = ProfitEmerald, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Test Biometric Prompt", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Offline Data Backup & Restore
+            // 3. Currency Preference
+            SettingsSectionCard(title = "Currency Symbol") {
+                val currencies = listOf("$", "€", "£", "৳", "₹", "¥", "₱", "R$", "₦", "د.إ", "₩", "₺")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    currencies.forEach { sym ->
+                        val isSelected = currentCurrency == sym
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) BrandDark else SurfaceSubtle)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) BrandDark else BorderSubtle,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectCurrency(sym) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = sym,
+                                fontSize = 16.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) SurfaceWhite else TextPrimary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 4. Offline Data Backup & Restore
             SettingsSectionCard(title = "Offline Backup & Export") {
                 Text(
                     text = "Hisab stores 100% of your data offline on device. You can export or import your records at any time.",
@@ -402,7 +506,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 4. Data Management & Tools
+            // 5. Data Management & Demo Seeding
             SettingsSectionCard(title = "Data Management & Tools") {
                 Row(
                     modifier = Modifier
@@ -455,84 +559,86 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 5. Build & GitHub Release Workflow Status
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(SurfaceWhite)
-                    .border(1.2.dp, BorderSubtle, RoundedCornerShape(18.dp))
-                    .padding(16.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(ProfitEmerald)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "AUTOMATED RELEASE WORKFLOW",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp,
-                            color = TextSecondary
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "GitHub Action Configured",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Workflow '.github/workflows/build-release.yml' is set up to assemble, sign, and publish release APK artifacts on push.",
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        color = TextSecondary
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
-    // PIN Setup Dialog / Screen
+    // PIN Setup / Change Full-Screen Sheet
     if (showPinSetupDialog) {
-        var setupStep by remember { mutableStateOf(1) }
-        var firstPin by remember { mutableStateOf("") }
+        PinSetupDialog(
+            onDismiss = { showPinSetupDialog = false },
+            onPinConfigured = { pin ->
+                onSetupPin(pin)
+                showPinSetupDialog = false
+            }
+        )
+    }
 
+    // Store Name Edit Dialog
+    if (showStoreNameEdit) {
         AlertDialog(
-            onDismissRequest = { showPinSetupDialog = false },
-            confirmButton = {},
+            onDismissRequest = { showStoreNameEdit = false },
+            title = { Text("Set Store Name", fontWeight = FontWeight.Bold) },
             text = {
-                PinLockScreen(
-                    title = if (setupStep == 1) "Create 4-Digit PIN" else "Confirm Your PIN",
-                    subtitle = if (setupStep == 1) "Enter a new 4-digit PIN for security" else "Re-enter the same 4-digit PIN",
-                    showBiometricButton = false,
-                    onPinComplete = { entered ->
-                        if (setupStep == 1) {
-                            firstPin = entered
-                            setupStep = 2
-                            true
-                        } else {
-                            if (entered == firstPin) {
-                                onSetupPin(entered)
-                                showPinSetupDialog = false
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
+                OutlinedTextField(
+                    value = editingStoreName,
+                    onValueChange = { editingStoreName = it },
+                    label = { Text("Store Name") },
+                    placeholder = { Text("e.g. Apex Electronics, Corner Market") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdateStoreName(editingStoreName)
+                        showStoreNameEdit = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStoreNameEdit = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Daily Target Profit Edit Dialog
+    if (showTargetEdit) {
+        AlertDialog(
+            onDismissRequest = { showTargetEdit = false },
+            title = { Text("Daily Profit Goal ($currentCurrency)", fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = editingDailyTarget,
+                    onValueChange = { editingDailyTarget = it },
+                    label = { Text("Target Profit Amount") },
+                    placeholder = { Text("e.g. 150") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = editingDailyTarget.toDoubleOrNull() ?: dailyTargetProfit
+                        onUpdateDailyTarget(parsed)
+                        showTargetEdit = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ProfitEmerald)
+                ) {
+                    Text("Save Goal", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTargetEdit = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }

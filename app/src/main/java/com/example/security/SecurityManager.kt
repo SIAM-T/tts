@@ -20,7 +20,9 @@ class SecurityManager(private val context: Context) {
         private const val KEY_PIN_ENABLED = "key_pin_enabled"
         private const val KEY_BIOMETRIC_ENABLED = "key_biometric_enabled"
         private const val KEY_CURRENCY = "key_currency"
-        private const val SALT = "hisab_store_salt_2026"
+        private const val KEY_STORE_NAME = "key_store_name"
+        private const val KEY_TARGET_PROFIT = "key_target_profit"
+        private const val SALT = "hisab_store_salt_2026_secure"
     }
 
     fun isPinEnabled(): Boolean {
@@ -71,62 +73,104 @@ class SecurityManager(private val context: Context) {
         prefs.edit().putString(KEY_CURRENCY, currency).apply()
     }
 
-    fun canUseBiometrics(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val biometricManager = context.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
-            if (biometricManager != null) {
-                val canAuth = biometricManager.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                return canAuth == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
-            }
-        }
-        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        return keyguard?.isDeviceSecure == true
+    fun getStoreName(): String {
+        return prefs.getString(KEY_STORE_NAME, "My Store") ?: "My Store"
     }
 
+    fun setStoreName(name: String) {
+        prefs.edit().putString(KEY_STORE_NAME, name.trim()).apply()
+    }
+
+    fun getDailyTargetProfit(): Double {
+        return prefs.getFloat(KEY_TARGET_PROFIT, 100.0f).toDouble()
+    }
+
+    fun setDailyTargetProfit(target: Double) {
+        prefs.edit().putFloat(KEY_TARGET_PROFIT, target.toFloat()).apply()
+    }
+
+    /**
+     * Checks if biometric hardware is present or enrolled on device.
+     */
+    fun canUseBiometrics(): Boolean {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bm = context.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
+                val status = bm?.canAuthenticate(
+                    android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                    android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK
+                )
+                if (status == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS) {
+                    return true
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val bm = context.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
+                @Suppress("DEPRECATION")
+                if (bm?.canAuthenticate() == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS) {
+                    return true
+                }
+            }
+        } catch (_: Throwable) { }
+
+        val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        return km?.isDeviceSecure == true
+    }
+
+    /**
+     * Triggers the biometric prompt safely with robust error handling and fallback.
+     */
     fun triggerBiometricPrompt(
         activity: Activity,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        if (activity.isFinishing || activity.isDestroyed) return
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val executor = Executors.newSingleThreadExecutor()
-            val cancellationSignal = CancellationSignal()
+            try {
+                val executor = Executors.newSingleThreadExecutor()
+                val cancellationSignal = CancellationSignal()
 
-            val prompt = BiometricPrompt.Builder(activity)
-                .setTitle("Unlock Hisab")
-                .setSubtitle("Confirm your fingerprint or face to access store calculations")
-                .setNegativeButton("Use PIN", executor) { _, _ ->
-                    activity.runOnUiThread {
-                        onError("PIN requested")
-                    }
-                }
-                .build()
-
-            prompt.authenticate(
-                cancellationSignal,
-                executor,
-                object : BiometricPrompt.AuthenticationCallback() {
-                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                val prompt = BiometricPrompt.Builder(activity)
+                    .setTitle("Unlock Hisab")
+                    .setSubtitle("Confirm your fingerprint or face to access store records")
+                    .setDescription("Keep your store revenue and financial records secure")
+                    .setNegativeButton("Use 4-Digit PIN", executor) { _, _ ->
                         activity.runOnUiThread {
-                            onSuccess()
+                            onError("Please enter your PIN")
                         }
                     }
+                    .build()
 
-                    override fun onAuthenticationFailed() {
-                        activity.runOnUiThread {
-                            onError("Biometric not recognized. Try again or enter PIN.")
+                prompt.authenticate(
+                    cancellationSignal,
+                    executor,
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                            activity.runOnUiThread {
+                                onSuccess()
+                            }
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            activity.runOnUiThread {
+                                onError("Biometric not recognized. Try again or use PIN.")
+                            }
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                            activity.runOnUiThread {
+                                val msg = errString?.toString() ?: "Biometric authentication cancelled"
+                                onError(msg)
+                            }
                         }
                     }
-
-                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
-                        activity.runOnUiThread {
-                            onError(errString?.toString() ?: "Biometric error")
-                        }
-                    }
-                }
-            )
+                )
+            } catch (e: Exception) {
+                onError("Biometric authentication unavailable: ${e.localizedMessage ?: "Unknown error"}")
+            }
         } else {
-            onError("Biometrics not supported on this Android version")
+            onError("Biometrics require Android 9.0 or higher")
         }
     }
 

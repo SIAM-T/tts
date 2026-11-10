@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.example.analytics.SalesAnalyticsReport
 import com.example.ui.TimeFilter
 import com.example.ui.components.MarginHealthMeter
+import com.example.ui.components.ProfitGoalSimulator
 import com.example.ui.components.RevenueProfitBarChart
 import com.example.ui.components.StatCard
 import com.example.ui.components.TopProductsList
@@ -252,6 +253,15 @@ fun AnalyticsScreen(
                 health = report.marginHealth,
                 totalSales = report.salesCount,
                 modifier = Modifier.testTag("margin_health_meter")
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // 5b. Profit Goal & Break-Even Simulator
+            ProfitGoalSimulator(
+                avgMarginPercent = report.overallMarginPercent,
+                currencySymbol = currencySymbol,
+                modifier = Modifier.testTag("profit_goal_simulator")
             )
 
             Spacer(modifier = Modifier.height(18.dp))

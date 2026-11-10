@@ -1,11 +1,16 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,18 +25,33 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,6 +60,7 @@ import com.example.analytics.DailySummary
 import com.example.analytics.MarginHealthBreakdown
 import com.example.analytics.ProductStat
 import com.example.ui.theme.BorderSubtle
+import com.example.ui.theme.BrandDark
 import com.example.ui.theme.CostAmber
 import com.example.ui.theme.LossRose
 import com.example.ui.theme.ProfitEmerald
@@ -62,9 +83,9 @@ fun RevenueProfitBarChart(
             modifier = modifier
                 .fillMaxWidth()
                 .height(180.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
                 .background(SurfaceWhite)
-                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -75,6 +96,8 @@ fun RevenueProfitBarChart(
         }
         return
     }
+
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
 
     val maxVal = remember(dailyData) {
         val maxRev = dailyData.maxOfOrNull { it.totalRevenue } ?: 1.0
@@ -107,13 +130,20 @@ fun RevenueProfitBarChart(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "REVENUE VS PROFIT TREND",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.6.sp,
-                    color = TextSecondary
-                )
+                Column {
+                    Text(
+                        text = "REVENUE VS PROFIT TREND",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "Tap any day bar for exact details",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(RevenueSapphire))
@@ -126,25 +156,84 @@ fun RevenueProfitBarChart(
                 }
             }
 
+            // Interactive Day Details Callout
+            val selectedDay = selectedIndex?.let { dailyData.getOrNull(it) }
+            AnimatedVisibility(visible = selectedDay != null) {
+                selectedDay?.let { day ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = day.dateLabel,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "${day.salesCount} transactions",
+                                    fontSize = 10.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("REVENUE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                                    Text("$currencySymbol${String.format(Locale.US, "%.2f", day.totalRevenue)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RevenueSapphire)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("PROFIT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                                    Text("${if (day.netProfit >= 0) "+" else ""}$currencySymbol${String.format(Locale.US, "%.2f", day.netProfit)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (day.netProfit >= 0) ProfitEmerald else LossRose)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("MARGIN", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                                    Text("${String.format(Locale.US, "%.1f", day.marginPercent)}%", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (day.netProfit >= 0) ProfitEmerald else LossRose)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Chart area
+            // Chart Canvas area with Horizontal Scroll
             val scrollState = rememberScrollState()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(scrollState)
             ) {
-                val itemWidth = 56.dp
+                val itemWidth = 58.dp
                 val totalChartWidth = (itemWidth * dailyData.size.coerceAtLeast(5)).coerceAtLeast(300.dp)
 
                 Canvas(
                     modifier = Modifier
                         .width(totalChartWidth)
                         .height(180.dp)
+                        .pointerInput(dailyData) {
+                            detectTapGestures { offset ->
+                                val slotW = size.width / dailyData.size
+                                val clickedIdx = (offset.x / slotW).toInt()
+                                if (clickedIdx in dailyData.indices) {
+                                    selectedIndex = if (selectedIndex == clickedIdx) null else clickedIdx
+                                }
+                            }
+                        }
                 ) {
                     val w = size.width
-                    val h = size.height - 35.dp.toPx() // leave room for labels
+                    val h = size.height - 35.dp.toPx()
                     val slotWidth = w / dailyData.size
                     val barWidth = 14.dp.toPx()
                     val spacing = 3.dp.toPx()
@@ -165,6 +254,16 @@ fun RevenueProfitBarChart(
                         val centerX = slotWidth * index + slotWidth / 2f
                         val progress = animationProgress.value
 
+                        // Highlighting tapped slot
+                        if (selectedIndex == index) {
+                            drawRoundRect(
+                                color = Color(0xFFF8FAFC),
+                                topLeft = Offset(centerX - slotWidth / 2f + 2f, 0f),
+                                size = Size(slotWidth - 4f, h),
+                                cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+                            )
+                        }
+
                         // Revenue Bar
                         val revHeight = ((item.totalRevenue / maxVal) * h * progress).toFloat()
                         val revLeft = centerX - barWidth - spacing / 2f
@@ -176,7 +275,7 @@ fun RevenueProfitBarChart(
                             cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
                         )
 
-                        // Profit Bar (could be negative if loss)
+                        // Profit Bar (positive or negative)
                         val profVal = item.netProfit
                         val isLoss = profVal < 0
                         val profColor = if (isLoss) LossRose else ProfitEmerald
@@ -193,9 +292,10 @@ fun RevenueProfitBarChart(
                         // Draw Date Label below
                         drawContext.canvas.nativeCanvas.apply {
                             val paint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.parseColor("#64748B")
+                                color = if (selectedIndex == index) android.graphics.Color.parseColor("#0F172A") else android.graphics.Color.parseColor("#64748B")
                                 textSize = with(density) { 10.sp.toPx() }
                                 textAlign = android.graphics.Paint.Align.CENTER
+                                isFakeBoldText = (selectedIndex == index)
                                 isAntiAlias = true
                             }
                             drawText(item.dateLabel, centerX, h + 22.dp.toPx(), paint)
@@ -230,83 +330,97 @@ fun MarginHealthMeter(
                 color = TextSecondary
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             if (totalSales == 0) {
                 Text("No sales data available", fontSize = 12.sp, color = TextMuted)
                 return@Column
             }
 
-            // Horizontal Segmented Bar
+            // Donut chart representation + Segmented Progress
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(16.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(SurfaceSubtle)
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (health.highMarginCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .weight(health.highMarginCount.toFloat())
-                            .height(16.dp)
-                            .background(ProfitEmerald)
-                    )
-                }
-                if (health.moderateMarginCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .weight(health.moderateMarginCount.toFloat())
-                            .height(16.dp)
-                            .background(RevenueSapphire)
-                    )
-                }
-                if (health.lowMarginCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .weight(health.lowMarginCount.toFloat())
-                            .height(16.dp)
-                            .background(CostAmber)
-                    )
-                }
-                if (health.lossCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .weight(health.lossCount.toFloat())
-                            .height(16.dp)
-                            .background(LossRose)
-                    )
-                }
-            }
+                // Circular Arc Donut Chart
+                Box(
+                    modifier = Modifier.size(90.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(80.dp)) {
+                        val strokeW = 12.dp.toPx()
+                        var currentAngle = -90f
 
-            Spacer(modifier = Modifier.height(14.dp))
+                        val highAngle = (health.highMarginCount.toFloat() / totalSales) * 360f
+                        val modAngle = (health.moderateMarginCount.toFloat() / totalSales) * 360f
+                        val lowAngle = (health.lowMarginCount.toFloat() / totalSales) * 360f
+                        val lossAngle = (health.lossCount.toFloat() / totalSales) * 360f
 
-            // Legend with counts and percentages
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MarginLegendRow(
-                    label = "High Margin (>35%)",
-                    count = health.highMarginCount,
-                    total = totalSales,
-                    color = ProfitEmerald
-                )
-                MarginLegendRow(
-                    label = "Moderate Margin (15% - 35%)",
-                    count = health.moderateMarginCount,
-                    total = totalSales,
-                    color = RevenueSapphire
-                )
-                MarginLegendRow(
-                    label = "Low Margin (0% - 15%)",
-                    count = health.lowMarginCount,
-                    total = totalSales,
-                    color = CostAmber
-                )
-                MarginLegendRow(
-                    label = "Loss (<0%)",
-                    count = health.lossCount,
-                    total = totalSales,
-                    color = LossRose
-                )
+                        if (highAngle > 0) {
+                            drawArc(color = ProfitEmerald, startAngle = currentAngle, sweepAngle = highAngle, useCenter = false, style = Stroke(strokeW, cap = StrokeCap.Round))
+                            currentAngle += highAngle
+                        }
+                        if (modAngle > 0) {
+                            drawArc(color = RevenueSapphire, startAngle = currentAngle, sweepAngle = modAngle, useCenter = false, style = Stroke(strokeW, cap = StrokeCap.Round))
+                            currentAngle += modAngle
+                        }
+                        if (lowAngle > 0) {
+                            drawArc(color = CostAmber, startAngle = currentAngle, sweepAngle = lowAngle, useCenter = false, style = Stroke(strokeW, cap = StrokeCap.Round))
+                            currentAngle += lowAngle
+                        }
+                        if (lossAngle > 0) {
+                            drawArc(color = LossRose, startAngle = currentAngle, sweepAngle = lossAngle, useCenter = false, style = Stroke(strokeW, cap = StrokeCap.Round))
+                        }
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "$totalSales",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "SALES",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextMuted
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Breakdown list
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MarginLegendRow(
+                        label = "High Margin (>35%)",
+                        count = health.highMarginCount,
+                        total = totalSales,
+                        color = ProfitEmerald
+                    )
+                    MarginLegendRow(
+                        label = "Healthy (15% - 35%)",
+                        count = health.moderateMarginCount,
+                        total = totalSales,
+                        color = RevenueSapphire
+                    )
+                    MarginLegendRow(
+                        label = "Slim (0% - 15%)",
+                        count = health.lowMarginCount,
+                        total = totalSales,
+                        color = CostAmber
+                    )
+                    MarginLegendRow(
+                        label = "Loss (<0%)",
+                        count = health.lossCount,
+                        total = totalSales,
+                        color = LossRose
+                    )
+                }
             }
         }
     }
@@ -328,19 +442,125 @@ private fun MarginLegendRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(10.dp)
+                    .size(9.dp)
                     .clip(CircleShape)
                     .background(color)
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(text = label, fontSize = 12.sp, color = TextPrimary)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(text = label, fontSize = 11.sp, color = TextPrimary)
         }
         Text(
             text = "$count (${String.format(Locale.US, "%.0f", pct)}%)",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
             color = TextSecondary
         )
+    }
+}
+
+/**
+ * Interactive Target Profit & Break-Even Simulator
+ */
+@Composable
+fun ProfitGoalSimulator(
+    avgMarginPercent: Double,
+    currencySymbol: String,
+    modifier: Modifier = Modifier
+) {
+    var targetProfit by remember { mutableDoubleStateOf(200.0) }
+
+    val safeMargin = if (avgMarginPercent > 5.0) avgMarginPercent else 30.0
+    val requiredRevenue = if (safeMargin > 0) (targetProfit / (safeMargin / 100.0)) else 0.0
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(1.2.dp, BorderSubtle, RoundedCornerShape(18.dp))
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(RevenueSapphire.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lightbulb,
+                            contentDescription = null,
+                            tint = RevenueSapphire,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "TARGET PROFIT SIMULATOR",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        color = TextSecondary
+                    )
+                }
+
+                Text(
+                    text = "Goal: $currencySymbol${targetProfit.toInt()}/day",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RevenueSapphire
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Slider(
+                value = targetProfit.toFloat(),
+                onValueChange = { targetProfit = (it / 10).toInt() * 10.0 },
+                valueRange = 50f..1000f,
+                colors = SliderDefaults.colors(
+                    thumbColor = RevenueSapphire,
+                    activeTrackColor = RevenueSapphire
+                )
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SurfaceWhite)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("REQUIRED SALES REVENUE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                    Text(
+                        text = "$currencySymbol${String.format(Locale.US, "%.2f", requiredRevenue)}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("STORE MARGIN BASE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextMuted)
+                    Text(
+                        text = "${String.format(Locale.US, "%.1f", safeMargin)}%",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ProfitEmerald
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -377,6 +597,8 @@ fun TopProductsList(
 
             val maxMetric = products.maxOfOrNull { if (isProfitMode) it.totalProfit else it.totalRevenue } ?: 1.0
 
+            val rankBadges = listOf("🥇", "🥈", "🥉", "4.", "5.")
+
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 products.forEachIndexed { index, product ->
                     val metric = if (isProfitMode) product.totalProfit else product.totalRevenue
@@ -390,10 +612,9 @@ fun TopProductsList(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${index + 1}.",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextMuted
+                                    text = rankBadges.getOrElse(index) { "${index + 1}." },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -414,7 +635,7 @@ fun TopProductsList(
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // Progress Bar
+                        // Animated Progress Bar
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

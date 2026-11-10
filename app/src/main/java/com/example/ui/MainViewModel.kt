@@ -31,11 +31,18 @@ enum class TimeFilter(val label: String) {
 }
 
 enum class MarginFilterTier(val label: String) {
-    ALL("All"),
+    ALL("All Margins"),
     HIGH("High (>35%)"),
-    MODERATE("Moderate (15-35%)"),
-    LOW("Low (0-15%)"),
+    MODERATE("Healthy (15-35%)"),
+    LOW("Slim (0-15%)"),
     LOSS("Loss (<0%)")
+}
+
+enum class SortOrder(val label: String) {
+    NEWEST("Newest First"),
+    HIGHEST_PROFIT("Highest Profit"),
+    HIGHEST_MARGIN("Highest Margin %"),
+    HIGHEST_PRICE("Highest Price")
 }
 
 data class TodaySummary(
@@ -58,11 +65,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _currencySymbol = MutableStateFlow(securityManager.getCurrency())
     val currencySymbol: StateFlow<String> = _currencySymbol.asStateFlow()
 
+    private val _storeName = MutableStateFlow(securityManager.getStoreName())
+    val storeName: StateFlow<String> = _storeName.asStateFlow()
+
+    private val _dailyTargetProfit = MutableStateFlow(securityManager.getDailyTargetProfit())
+    val dailyTargetProfit: StateFlow<Double> = _dailyTargetProfit.asStateFlow()
+
     private val _timeFilter = MutableStateFlow(TimeFilter.TODAY)
     val timeFilter: StateFlow<TimeFilter> = _timeFilter.asStateFlow()
 
     private val _marginFilter = MutableStateFlow(MarginFilterTier.ALL)
     val marginFilter: StateFlow<MarginFilterTier> = _marginFilter.asStateFlow()
+
+    private val _sortOrder = MutableStateFlow(SortOrder.NEWEST)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -97,26 +113,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TodaySummary())
 
-    // Filtered sales for Sales Log tab
-    val filteredSales: StateFlow<List<SaleEntity>> = combine(
-        allSales,
+    private data class FilterState(
+        val time: TimeFilter,
+        val margin: MarginFilterTier,
+        val query: String,
+        val specificDate: Long?,
+        val sort: SortOrder
+    )
+
+    private val filterParams = combine(
         _timeFilter,
         _marginFilter,
         _searchQuery,
-        _selectedSpecificDateMillis
-    ) { sales, time, margin, query, specificDate ->
+        _selectedSpecificDateMillis,
+        _sortOrder
+    ) { time, margin, query, specificDate, sort ->
+        FilterState(time, margin, query, specificDate, sort)
+    }
+
+    // Filtered and sorted sales for Sales Log tab
+    val filteredSales: StateFlow<List<SaleEntity>> = combine(allSales, filterParams) { sales, filter ->
         var list = sales
 
         // 1. Specific date or time preset
-        if (specificDate != null) {
-            val targetCal = Calendar.getInstance().apply { timeInMillis = specificDate }
+        if (filter.specificDate != null) {
+            val targetCal = Calendar.getInstance().apply { timeInMillis = filter.specificDate }
             list = list.filter { s ->
                 val sCal = Calendar.getInstance().apply { timeInMillis = s.timestamp }
                 sCal.get(Calendar.YEAR) == targetCal.get(Calendar.YEAR) &&
                         sCal.get(Calendar.DAY_OF_YEAR) == targetCal.get(Calendar.DAY_OF_YEAR)
             }
         } else {
-            list = when (time) {
+            list = when (filter.time) {
                 TimeFilter.TODAY -> list.filter { AnalyticsEngine.isToday(it.timestamp) }
                 TimeFilter.YESTERDAY -> list.filter { AnalyticsEngine.isYesterday(it.timestamp) }
                 TimeFilter.LAST_7_DAYS -> list.filter { AnalyticsEngine.isInLastDays(it.timestamp, 7) }
@@ -126,7 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // 2. Margin Tier
-        list = when (margin) {
+        list = when (filter.margin) {
             MarginFilterTier.ALL -> list
             MarginFilterTier.HIGH -> list.filter { it.marginPercent >= 35.0 }
             MarginFilterTier.MODERATE -> list.filter { it.marginPercent in 15.0..34.999 }
@@ -135,9 +163,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // 3. Search query
-        if (query.isNotBlank()) {
-            val q = query.trim().lowercase()
+        if (filter.query.isNotBlank()) {
+            val q = filter.query.trim().lowercase()
             list = list.filter { it.title.lowercase().contains(q) || it.note.lowercase().contains(q) }
+        }
+
+        // 4. Sort Order
+        list = when (filter.sort) {
+            SortOrder.NEWEST -> list.sortedByDescending { it.timestamp }
+            SortOrder.HIGHEST_PROFIT -> list.sortedByDescending { it.profit }
+            SortOrder.HIGHEST_MARGIN -> list.sortedByDescending { it.marginPercent }
+            SortOrder.HIGHEST_PRICE -> list.sortedByDescending { it.price * it.quantity }
         }
 
         list
@@ -177,6 +213,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _marginFilter.value = filter
     }
 
+    fun setSortOrder(order: SortOrder) {
+        _sortOrder.value = order
+    }
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }
@@ -203,7 +243,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 note = note.trim()
             )
             repository.insertSale(sale)
-            _snackMessage.emit("Sale recorded! Profit: ${_currencySymbol.value}${String.format("%.2f", sale.profit)}")
+            val prefix = if (sale.profit >= 0) "+" else ""
+            _snackMessage.emit("Sale recorded! Profit: $prefix${_currencySymbol.value}${String.format("%.2f", sale.profit)}")
+        }
+    }
+
+    fun duplicateSale(sale: SaleEntity) {
+        viewModelScope.launch {
+            val newSale = sale.copy(
+                id = 0,
+                timestamp = System.currentTimeMillis()
+            )
+            repository.insertSale(newSale)
+            _snackMessage.emit("Repeated '${newSale.title}'")
         }
     }
 
@@ -231,13 +283,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun seedSampleData() {
         viewModelScope.launch {
             repository.seedSampleData()
-            _snackMessage.emit("Sample store sales loaded!")
+            _snackMessage.emit("13 realistic store sales loaded!")
         }
     }
 
     fun setCurrency(symbol: String) {
         securityManager.setCurrency(symbol)
         _currencySymbol.value = symbol
+    }
+
+    fun setStoreName(name: String) {
+        securityManager.setStoreName(name)
+        _storeName.value = securityManager.getStoreName()
+        viewModelScope.launch {
+            _snackMessage.emit("Store name updated!")
+        }
+    }
+
+    fun setDailyTarget(target: Double) {
+        securityManager.setDailyTargetProfit(target)
+        _dailyTargetProfit.value = target
+        viewModelScope.launch {
+            _snackMessage.emit("Daily profit goal set to ${_currencySymbol.value}${String.format("%.2f", target)}")
+        }
     }
 
     // Security Unlock / Lock
@@ -255,11 +323,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun resetPinSecurity() {
+        securityManager.removePin()
+        _isUnlocked.value = true
+        viewModelScope.launch {
+            _snackMessage.emit("PIN reset. Security turned off.")
+        }
+    }
+
     fun setupNewPin(pin: String) {
         securityManager.setPin(pin)
         _isUnlocked.value = true
         viewModelScope.launch {
-            _snackMessage.emit("PIN lock activated!")
+            _snackMessage.emit("PIN lock activated successfully!")
         }
     }
 
@@ -276,14 +352,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerBiometricAuth(activity: Activity) {
-        if (!securityManager.isBiometricEnabled() || !securityManager.canUseBiometrics()) return
+        if (!securityManager.isBiometricEnabled()) return
         securityManager.triggerBiometricPrompt(
             activity = activity,
             onSuccess = {
                 _isUnlocked.value = true
+                viewModelScope.launch {
+                    _snackMessage.emit("Unlocked via Biometrics!")
+                }
             },
-            onError = { _ ->
-                // Biometrics dismissed or failed, fallback to PIN is available on screen
+            onError = { err ->
+                // Biometrics error/cancellation reported gracefully
             }
         )
     }
