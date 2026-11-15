@@ -1,17 +1,16 @@
 package com.example.ui.screens
 
-import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,32 +20,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachMoney
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockClock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Store
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -55,62 +55,76 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.PinSetupDialog
-import com.example.ui.theme.BackgroundLight
-import com.example.ui.theme.BorderSubtle
+import com.example.ui.components.bounceClick
+import com.example.ui.components.formatMoney
+import com.example.ui.components.performHapticTap
+import com.example.ui.theme.BorderHairline
 import com.example.ui.theme.BrandDark
-import com.example.ui.theme.CostAmber
 import com.example.ui.theme.LossRose
 import com.example.ui.theme.ProfitEmerald
 import com.example.ui.theme.RevenueSapphire
 import com.example.ui.theme.SurfaceSubtle
 import com.example.ui.theme.SurfaceWhite
+import com.example.ui.theme.TabularNumberStyle
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(
     isPinEnabled: Boolean,
     isBiometricEnabled: Boolean,
+    isAutoLockEnabled: Boolean,
+    isHapticsEnabled: Boolean,
     canUseBiometrics: Boolean,
+    biometricStatusText: String,
     currentCurrency: String,
     storeName: String,
     dailyTargetProfit: Double,
+    salesCount: Int,
     onSetupPin: (String) -> Unit,
     onDisablePin: () -> Unit,
     onToggleBiometric: (Boolean) -> Unit,
+    onToggleAutoLock: (Boolean) -> Unit,
+    onToggleHaptics: (Boolean) -> Unit,
     onSelectCurrency: (String) -> Unit,
     onUpdateStoreName: (String) -> Unit,
     onUpdateDailyTarget: (Double) -> Unit,
     onTestBiometrics: () -> Unit,
-    onExportCsv: suspend () -> String,
-    onExportJson: suspend () -> String,
-    onImportCsv: (String) -> Unit,
-    onImportJson: (String) -> Unit,
+    onSuppressAutoLock: () -> Unit,
+    onSaveCsvToUri: (Uri) -> Unit,
+    onSaveJsonToUri: (Uri) -> Unit,
+    onShareFile: (isCsv: Boolean) -> Unit,
+    onImportFromUri: (Uri) -> Unit,
+    onImportText: (raw: String, isCsv: Boolean) -> Unit,
     onSeedSampleData: () -> Unit,
     onClearAllData: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
     var showPinSetupDialog by remember { mutableStateOf(false) }
-    var showImportDialog by remember { mutableStateOf(false) }
-    var importType by remember { mutableStateOf("CSV") }
-    var importRawText by remember { mutableStateOf("") }
+    var showPasteImportDialog by remember { mutableStateOf(false) }
+    var pasteImportIsCsv by remember { mutableStateOf(true) }
+    var pasteImportText by remember { mutableStateOf("") }
     var showClearConfirmation by remember { mutableStateOf(false) }
     var showSeedConfirmation by remember { mutableStateOf(false) }
 
@@ -120,69 +134,55 @@ fun SettingsScreen(
     var editingDailyTarget by remember { mutableStateOf(dailyTargetProfit.toInt().toString()) }
     var showTargetEdit by remember { mutableStateOf(false) }
 
-    fun shareText(title: String, content: String) {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, title)
-            putExtra(Intent.EXTRA_TEXT, content)
-        }
-        context.startActivity(Intent.createChooser(intent, "Export Store Data"))
+    // Real File Save Launchers (Storage Access Framework)
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let { onSaveCsvToUri(it) }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BackgroundLight)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            // Header
-            Text(
-                text = "Store Settings & Controls",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Security, store customization & offline backup",
-                fontSize = 13.sp,
-                color = TextSecondary
-            )
+    val saveJsonLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { onSaveJsonToUri(it) }
+    }
 
-            Spacer(modifier = Modifier.height(18.dp))
+    val openFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { onImportFromUri(it) }
+    }
 
-            // 1. Store Profile & Goals
-            SettingsSectionCard(title = "Store Profile & Daily Goals") {
-                // Store Name Row
+    fun defaultFileName(ext: String): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        return "Hisab_Sales_$stamp.$ext"
+    }
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val isWide = maxWidth >= 740.dp
+
+        val storeProfileCard: @Composable () -> Unit = {
+            SettingsSectionCard(title = "Store Profile & Preferences") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(RevenueSapphire.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Store,
-                                contentDescription = null,
-                                tint = RevenueSapphire,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        SettingsIconBadge(Icons.Default.Store, RevenueSapphire)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text("Store Name", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                            Text(storeName, fontSize = 12.sp, color = TextSecondary)
+                            Text(
+                                text = storeName,
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
 
@@ -190,37 +190,31 @@ fun SettingsScreen(
                         editingStoreName = storeName
                         showStoreNameEdit = true
                     }) {
-                        Text("Edit", fontSize = 12.sp, color = RevenueSapphire)
+                        Text("Edit", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RevenueSapphire)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = BorderHairline)
 
-                // Daily Profit Target Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(ProfitEmerald.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Flag,
-                                contentDescription = null,
-                                tint = ProfitEmerald,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        SettingsIconBadge(Icons.Default.Flag, ProfitEmerald)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("Daily Profit Target", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                            Text("$currentCurrency${dailyTargetProfit.toInt()}/day target", fontSize = 12.sp, color = TextSecondary)
+                            Text("Daily Profit Goal", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text(
+                                text = "${formatMoney(dailyTargetProfit, currentCurrency)} / day",
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                style = TabularNumberStyle
+                            )
                         }
                     }
 
@@ -228,153 +222,54 @@ fun SettingsScreen(
                         editingDailyTarget = dailyTargetProfit.toInt().toString()
                         showTargetEdit = true
                     }) {
-                        Text("Change", fontSize = 12.sp, color = ProfitEmerald)
+                        Text("Change", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ProfitEmerald)
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = BorderHairline)
 
-            // 2. PIN & Biometric Security
-            SettingsSectionCard(title = "Security & Biometrics") {
-                // PIN row
+                // Haptic Feedback Toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(RevenueSapphire.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPinEnabled) Icons.Default.Lock else Icons.Default.LockOpen,
-                                contentDescription = null,
-                                tint = RevenueSapphire,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        SettingsIconBadge(Icons.Default.Vibration, BrandDark)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = "App 4-Digit PIN",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = if (isPinEnabled) "PIN lock active on app launch" else "Protect app on startup",
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
+                            Text("Haptic Feedback", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text("Tactile tap feedback on sales & PIN", fontSize = 11.sp, color = TextSecondary)
                         }
                     }
 
                     Switch(
-                        checked = isPinEnabled,
-                        onCheckedChange = { checked ->
-                            if (checked) {
-                                showPinSetupDialog = true
-                            } else {
-                                onDisablePin()
-                            }
+                        checked = isHapticsEnabled,
+                        onCheckedChange = {
+                            onToggleHaptics(it)
+                            if (it) performHapticTap(context, true)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = SurfaceWhite,
                             checkedTrackColor = ProfitEmerald
-                        )
+                        ),
+                        modifier = Modifier.testTag("switch_haptics")
                     )
                 }
 
-                if (isPinEnabled) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { showPinSetupDialog = true }) {
-                            Text("Change PIN", fontSize = 12.sp, color = RevenueSapphire)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(onClick = { onDisablePin() }) {
-                            Text("Turn Off", fontSize = 12.sp, color = LossRose)
-                        }
-                    }
-                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = BorderHairline)
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Currency Symbol",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Biometrics row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(ProfitEmerald.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Fingerprint,
-                                contentDescription = null,
-                                tint = ProfitEmerald,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Biometric Unlock",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = if (canUseBiometrics) "Fingerprint / Face recognition" else "Hardware check ready",
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = isBiometricEnabled,
-                        onCheckedChange = { onToggleBiometric(it) },
-                        enabled = isPinEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = SurfaceWhite,
-                            checkedTrackColor = ProfitEmerald
-                        )
-                    )
-                }
-
-                if (isBiometricEnabled) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = onTestBiometrics,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceSubtle, contentColor = TextPrimary),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(imageVector = Icons.Default.Fingerprint, contentDescription = null, tint = ProfitEmerald, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Test Biometric Prompt", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 3. Currency Preference
-            SettingsSectionCard(title = "Currency Symbol") {
                 val currencies = listOf("$", "€", "£", "৳", "₹", "¥", "₱", "R$", "₦", "د.إ", "₩", "₺")
                 Row(
                     modifier = Modifier
@@ -386,15 +281,18 @@ fun SettingsScreen(
                         val isSelected = currentCurrency == sym
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(48.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(if (isSelected) BrandDark else SurfaceSubtle)
                                 .border(
                                     1.dp,
-                                    if (isSelected) BrandDark else BorderSubtle,
+                                    if (isSelected) BrandDark else BorderHairline,
                                     RoundedCornerShape(12.dp)
                                 )
-                                .clickable { onSelectCurrency(sym) },
+                                .bounceClick {
+                                    performHapticTap(context, isHapticsEnabled)
+                                    onSelectCurrency(sym)
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -407,107 +305,282 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        val securityCard: @Composable () -> Unit = {
+            SettingsSectionCard(title = "Security & App Lock") {
+                // PIN Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        SettingsIconBadge(
+                            if (isPinEnabled) Icons.Default.Lock else Icons.Default.LockOpen,
+                            RevenueSapphire
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("App 4-Digit PIN", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text(
+                                text = if (isPinEnabled) "PIN protection is active" else "Protect store records with PIN",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
 
-            // 4. Offline Data Backup & Restore
-            SettingsSectionCard(title = "Offline Backup & Export") {
+                    Switch(
+                        checked = isPinEnabled,
+                        onCheckedChange = { checked ->
+                            if (checked) showPinSetupDialog = true else onDisablePin()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = SurfaceWhite,
+                            checkedTrackColor = ProfitEmerald
+                        ),
+                        modifier = Modifier.testTag("switch_pin")
+                    )
+                }
+
+                AnimatedVisibility(visible = isPinEnabled) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showPinSetupDialog = true }) {
+                                Text("Change PIN", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RevenueSapphire)
+                            }
+                            TextButton(onClick = onDisablePin) {
+                                Text("Disable PIN", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LossRose)
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = BorderHairline)
+
+                        // Auto-Lock on Background Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                SettingsIconBadge(Icons.Default.LockClock, BrandDark)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("Auto-Lock in Background", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                    Text("Require PIN when switching back to app", fontSize = 11.sp, color = TextSecondary)
+                                }
+                            }
+
+                            Switch(
+                                checked = isAutoLockEnabled,
+                                onCheckedChange = onToggleAutoLock,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = SurfaceWhite,
+                                    checkedTrackColor = ProfitEmerald
+                                ),
+                                modifier = Modifier.testTag("switch_autolock")
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = BorderHairline)
+
+                // Biometric Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        SettingsIconBadge(Icons.Default.Fingerprint, ProfitEmerald)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Biometric Unlock", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text(
+                                text = if (!isPinEnabled) "Enable PIN first to unlock with biometrics" else biometricStatusText,
+                                fontSize = 11.sp,
+                                color = if (canUseBiometrics) TextSecondary else LossRose
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = isBiometricEnabled,
+                        onCheckedChange = onToggleBiometric,
+                        enabled = isPinEnabled && canUseBiometrics,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = SurfaceWhite,
+                            checkedTrackColor = ProfitEmerald
+                        ),
+                        modifier = Modifier.testTag("switch_biometric")
+                    )
+                }
+
+                if (isPinEnabled && canUseBiometrics) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onTestBiometrics,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Fingerprint,
+                            contentDescription = null,
+                            tint = ProfitEmerald,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Test Biometric Unlock", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    }
+                }
+            }
+        }
+
+        val backupCard: @Composable () -> Unit = {
+            SettingsSectionCard(title = "File Backup & Restore ($salesCount records)") {
                 Text(
-                    text = "Hisab stores 100% of your data offline on device. You can export or import your records at any time.",
+                    text = "Export real .csv or .json files to Downloads/Drive for large datasets, or import a backup file directly from device storage.",
                     fontSize = 12.sp,
                     color = TextSecondary,
-                    lineHeight = 16.sp
+                    lineHeight = 17.sp
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Primary Save-to-File Actions
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Button(
                         onClick = {
-                            coroutineScope.launch {
-                                val csv = onExportCsv()
-                                shareText("Hisab Store Sales CSV Backup", csv)
-                            }
+                            performHapticTap(context, isHapticsEnabled)
+                            onSuppressAutoLock()
+                            saveCsvLauncher.launch(defaultFileName("csv"))
                         },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = BrandDark),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("save_csv_file_button")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export CSV", fontSize = 13.sp)
-                        }
+                        Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save .CSV File", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
 
                     Button(
                         onClick = {
-                            coroutineScope.launch {
-                                val json = onExportJson()
-                                shareText("Hisab Store Sales JSON Backup", json)
-                            }
+                            performHapticTap(context, isHapticsEnabled)
+                            onSuppressAutoLock()
+                            saveJsonLauncher.launch(defaultFileName("json"))
                         },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = RevenueSapphire),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("save_json_file_button")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export JSON", fontSize = 13.sp)
-                        }
+                        Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save .JSON File", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Share File Attachment Actions (FileProvider EXTRA_STREAM)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            performHapticTap(context, isHapticsEnabled)
+                            onShareFile(true)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .testTag("share_csv_file_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = BrandDark, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share .CSV", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = BrandDark)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            performHapticTap(context, isHapticsEnabled)
+                            onShareFile(false)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .testTag("share_json_file_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = RevenueSapphire, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share .JSON", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = RevenueSapphire)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Import from File Picker
+                Button(
+                    onClick = {
+                        performHapticTap(context, isHapticsEnabled)
+                        onSuppressAutoLock()
+                        openFileLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/json", "text/plain", "*/*"))
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceSubtle, contentColor = TextPrimary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("import_file_button")
                 ) {
-                    Button(
-                        onClick = {
-                            importType = "CSV"
-                            importRawText = ""
-                            showImportDialog = true
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceSubtle, contentColor = TextPrimary),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import CSV", fontSize = 13.sp)
-                        }
-                    }
+                    Icon(imageVector = Icons.Default.UploadFile, contentDescription = null, tint = ProfitEmerald, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Import .CSV or .JSON File", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
 
-                    Button(
-                        onClick = {
-                            importType = "JSON"
-                            importRawText = ""
-                            showImportDialog = true
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceSubtle, contentColor = TextPrimary),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import JSON", fontSize = 13.sp)
-                        }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = {
+                        pasteImportText = ""
+                        pasteImportIsCsv = true
+                        showPasteImportDialog = true
+                    }) {
+                        Text("Or paste text snippet", fontSize = 11.sp, color = TextMuted)
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 5. Data Management & Demo Seeding
-            SettingsSectionCard(title = "Data Management & Tools") {
+        val dataToolsCard: @Composable () -> Unit = {
+            SettingsSectionCard(title = "Database Tools") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -516,23 +589,15 @@ fun SettingsScreen(
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(RevenueSapphire.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = RevenueSapphire, modifier = Modifier.size(18.dp))
-                    }
+                    SettingsIconBadge(Icons.Default.Refresh, RevenueSapphire)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Seed Realistic Demo Store Sales", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        Text("Populates sample items to test charts & analytics", fontSize = 11.sp, color = TextSecondary)
+                        Text("Load Demo Store Sales", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Text("Add 13 sample sales across 6 days to explore analytics", fontSize = 11.sp, color = TextSecondary)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = BorderHairline)
 
                 Row(
                     modifier = Modifier
@@ -542,30 +607,77 @@ fun SettingsScreen(
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(LossRose.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(imageVector = Icons.Default.DeleteForever, contentDescription = null, tint = LossRose, modifier = Modifier.size(18.dp))
-                    }
+                    SettingsIconBadge(Icons.Default.DeleteForever, LossRose)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Clear All Sales Data", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = LossRose)
-                        Text("Reset database back to clean empty state", fontSize = 11.sp, color = TextMuted)
+                        Text("Permanently erase local database records", fontSize = 11.sp, color = TextMuted)
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(24.dp))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = if (isWide) 20.dp else 16.dp, vertical = 12.dp)
+        ) {
+            Column(modifier = Modifier.widthIn(max = 980.dp).fillMaxWidth()) {
+                Text(
+                    text = "Store Settings & Controls",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Offline security, preferences & file backup",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isWide) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            storeProfileCard()
+                            dataToolsCard()
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            securityCard()
+                            backupCard()
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        storeProfileCard()
+                        securityCard()
+                        backupCard()
+                        dataToolsCard()
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 
-    // PIN Setup / Change Full-Screen Sheet
     if (showPinSetupDialog) {
         PinSetupDialog(
+            hapticsEnabled = isHapticsEnabled,
             onDismiss = { showPinSetupDialog = false },
             onPinConfigured = { pin ->
                 onSetupPin(pin)
@@ -574,17 +686,16 @@ fun SettingsScreen(
         )
     }
 
-    // Store Name Edit Dialog
     if (showStoreNameEdit) {
         AlertDialog(
             onDismissRequest = { showStoreNameEdit = false },
-            title = { Text("Set Store Name", fontWeight = FontWeight.Bold) },
+            title = { Text("Store Name", fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = editingStoreName,
                     onValueChange = { editingStoreName = it },
                     label = { Text("Store Name") },
-                    placeholder = { Text("e.g. Apex Electronics, Corner Market") },
+                    placeholder = { Text("e.g. Apex Electronics") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -601,14 +712,11 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showStoreNameEdit = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showStoreNameEdit = false }) { Text("Cancel") }
             }
         )
     }
 
-    // Daily Target Profit Edit Dialog
     if (showTargetEdit) {
         AlertDialog(
             onDismissRequest = { showTargetEdit = false },
@@ -616,9 +724,11 @@ fun SettingsScreen(
             text = {
                 OutlinedTextField(
                     value = editingDailyTarget,
-                    onValueChange = { editingDailyTarget = it },
+                    onValueChange = { raw ->
+                        if (raw.all { it.isDigit() || it == '.' }) editingDailyTarget = raw
+                    },
                     label = { Text("Target Profit Amount") },
-                    placeholder = { Text("e.g. 150") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -636,67 +746,72 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showTargetEdit = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showTargetEdit = false }) { Text("Cancel") }
             }
         )
     }
 
-    // Import Dialog (paste CSV or JSON)
-    if (showImportDialog) {
+    if (showPasteImportDialog) {
         AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = { Text("Import $importType Data", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showPasteImportDialog = false },
+            title = { Text("Paste Backup Data", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text(
-                        text = "Paste your $importType content below. Records will be added to your offline database.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (pasteImportIsCsv) BrandDark else SurfaceSubtle)
+                                .clickable { pasteImportIsCsv = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (pasteImportIsCsv) Color.White else TextPrimary)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (!pasteImportIsCsv) RevenueSapphire else SurfaceSubtle)
+                                .clickable { pasteImportIsCsv = false }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (!pasteImportIsCsv) Color.White else TextPrimary)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
-                        value = importRawText,
-                        onValueChange = { importRawText = it },
-                        placeholder = { Text("Paste $importType text here...") },
+                        value = pasteImportText,
+                        onValueChange = { pasteImportText = it },
+                        placeholder = { Text("Paste ${if (pasteImportIsCsv) "CSV" else "JSON"} text...") },
                         maxLines = 8,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(180.dp)
+                            .height(160.dp)
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (importType == "CSV") {
-                            onImportCsv(importRawText)
-                        } else {
-                            onImportJson(importRawText)
-                        }
-                        showImportDialog = false
+                        onImportText(pasteImportText, pasteImportIsCsv)
+                        showPasteImportDialog = false
                     },
-                    enabled = importRawText.isNotBlank(),
+                    enabled = pasteImportText.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
                 ) {
-                    Text("Import Now", color = SurfaceWhite)
+                    Text("Import", color = SurfaceWhite)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showImportDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showPasteImportDialog = false }) { Text("Cancel") }
             }
         )
     }
 
-    // Clear Confirmation Dialog
     if (showClearConfirmation) {
         AlertDialog(
             onDismissRequest = { showClearConfirmation = false },
             title = { Text("Clear All Sales?", fontWeight = FontWeight.Bold) },
-            text = { Text("This will permanently delete all recorded transactions from the local device database. This action cannot be undone.") },
+            text = { Text("This will permanently erase all $salesCount recorded transactions from this device.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -705,23 +820,20 @@ fun SettingsScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = LossRose)
                 ) {
-                    Text("Yes, Clear Everything", color = SurfaceWhite)
+                    Text("Clear Everything", color = SurfaceWhite)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearConfirmation = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showClearConfirmation = false }) { Text("Cancel") }
             }
         )
     }
 
-    // Seed Confirmation Dialog
     if (showSeedConfirmation) {
         AlertDialog(
             onDismissRequest = { showSeedConfirmation = false },
             title = { Text("Load Sample Store Data?", fontWeight = FontWeight.Bold) },
-            text = { Text("This will add 13 realistic retail store sales across the last 7 days so you can test and view charts, margin distributions, and financial reports.") },
+            text = { Text("Adds 13 realistic store sales across the past week so you can explore trends and reports immediately.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -730,14 +842,30 @@ fun SettingsScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = BrandDark)
                 ) {
-                    Text("Load Sample Sales", color = SurfaceWhite)
+                    Text("Load Samples", color = SurfaceWhite)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showSeedConfirmation = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showSeedConfirmation = false }) { Text("Cancel") }
             }
+        )
+    }
+}
+
+@Composable
+private fun SettingsIconBadge(icon: ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(19.dp)
         )
     }
 }
@@ -747,20 +875,20 @@ private fun SettingsSectionCard(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Box(
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = SurfaceWhite,
+        shadowElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(SurfaceWhite)
-            .border(1.2.dp, BorderSubtle, RoundedCornerShape(18.dp))
-            .padding(16.dp)
+            .border(1.dp, BorderHairline, RoundedCornerShape(20.dp))
     ) {
-        Column {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = title.uppercase(),
+                text = title.uppercase(Locale.US),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.6.sp,
+                letterSpacing = 0.7.sp,
                 color = TextSecondary
             )
             Spacer(modifier = Modifier.height(12.dp))

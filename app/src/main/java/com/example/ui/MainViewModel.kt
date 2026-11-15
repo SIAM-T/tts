@@ -2,6 +2,9 @@ package com.example.ui
 
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.analytics.AnalyticsEngine
@@ -10,6 +13,7 @@ import com.example.data.AppDatabase
 import com.example.data.SaleRepository
 import com.example.model.SaleEntity
 import com.example.security.SecurityManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -20,7 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 enum class TimeFilter(val label: String) {
     TODAY("Today"),
@@ -50,7 +60,8 @@ data class TodaySummary(
     val cost: Double = 0.0,
     val profit: Double = 0.0,
     val marginPercent: Double = 0.0,
-    val count: Int = 0
+    val count: Int = 0,
+    val transactionCount: Int = 0
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -61,6 +72,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isUnlocked = MutableStateFlow(!securityManager.isPinEnabled())
     val isUnlocked: StateFlow<Boolean> = _isUnlocked.asStateFlow()
+
+    private val _isPinEnabled = MutableStateFlow(securityManager.isPinEnabled())
+    val isPinEnabled: StateFlow<Boolean> = _isPinEnabled.asStateFlow()
+
+    private val _isBiometricEnabled = MutableStateFlow(securityManager.isBiometricEnabled())
+    val isBiometricEnabled: StateFlow<Boolean> = _isBiometricEnabled.asStateFlow()
+
+    private val _isAutoLockEnabled = MutableStateFlow(securityManager.isAutoLockEnabled())
+    val isAutoLockEnabled: StateFlow<Boolean> = _isAutoLockEnabled.asStateFlow()
+
+    private val _isHapticsEnabled = MutableStateFlow(securityManager.isHapticsEnabled())
+    val isHapticsEnabled: StateFlow<Boolean> = _isHapticsEnabled.asStateFlow()
 
     private val _currencySymbol = MutableStateFlow(securityManager.getCurrency())
     val currencySymbol: StateFlow<String> = _currencySymbol.asStateFlow()
@@ -89,27 +112,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _snackMessage = MutableSharedFlow<String>()
     val snackMessage: SharedFlow<String> = _snackMessage.asSharedFlow()
 
-    // All sales stream
+    private var suppressNextAutoLock = false
+
     val allSales: StateFlow<List<SaleEntity>> = repository.allSales
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentTitles: StateFlow<List<String>> = repository.recentTitles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Today's summary computation
     val todaySummary: StateFlow<TodaySummary> = allSales.combine(_timeFilter) { sales, _ ->
         val todayItems = sales.filter { AnalyticsEngine.isToday(it.timestamp) }
         val rev = todayItems.sumOf { it.price * it.quantity }
         val cost = todayItems.sumOf { it.cost * it.quantity }
         val prof = rev - cost
         val margin = if (rev > 0) (prof / rev) * 100.0 else 0.0
-        val count = todayItems.sumOf { it.quantity }
+        val unitCount = todayItems.sumOf { it.quantity }
         TodaySummary(
             revenue = rev,
             cost = cost,
             profit = prof,
             marginPercent = margin,
-            count = count
+            count = unitCount,
+            transactionCount = todayItems.size
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TodaySummary())
 
@@ -131,11 +155,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         FilterState(time, margin, query, specificDate, sort)
     }
 
-    // Filtered and sorted sales for Sales Log tab
     val filteredSales: StateFlow<List<SaleEntity>> = combine(allSales, filterParams) { sales, filter ->
         var list = sales
 
-        // 1. Specific date or time preset
         if (filter.specificDate != null) {
             val targetCal = Calendar.getInstance().apply { timeInMillis = filter.specificDate }
             list = list.filter { s ->
@@ -153,7 +175,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 2. Margin Tier
         list = when (filter.margin) {
             MarginFilterTier.ALL -> list
             MarginFilterTier.HIGH -> list.filter { it.marginPercent >= 35.0 }
@@ -162,13 +183,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MarginFilterTier.LOSS -> list.filter { it.marginPercent < 0.0 }
         }
 
-        // 3. Search query
         if (filter.query.isNotBlank()) {
             val q = filter.query.trim().lowercase()
             list = list.filter { it.title.lowercase().contains(q) || it.note.lowercase().contains(q) }
         }
 
-        // 4. Sort Order
         list = when (filter.sort) {
             SortOrder.NEWEST -> list.sortedByDescending { it.timestamp }
             SortOrder.HIGHEST_PROFIT -> list.sortedByDescending { it.profit }
@@ -179,7 +198,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         list
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Analytics report based on active time filter
     val currentAnalyticsReport: StateFlow<SalesAnalyticsReport> = combine(
         allSales,
         _timeFilter,
@@ -243,8 +261,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 note = note.trim()
             )
             repository.insertSale(sale)
-            val prefix = if (sale.profit >= 0) "+" else ""
-            _snackMessage.emit("Sale recorded! Profit: $prefix${_currencySymbol.value}${String.format("%.2f", sale.profit)}")
         }
     }
 
@@ -262,7 +278,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSale(sale: SaleEntity) {
         viewModelScope.launch {
             repository.updateSale(sale)
-            _snackMessage.emit("Sale updated successfully")
+            _snackMessage.emit("Sale updated")
         }
     }
 
@@ -276,7 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearAllSales() {
         viewModelScope.launch {
             repository.clearAll()
-            _snackMessage.emit("All sales cleared")
+            _snackMessage.emit("All sales data cleared")
         }
     }
 
@@ -287,24 +303,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Reactive Settings Mutations
     fun setCurrency(symbol: String) {
         securityManager.setCurrency(symbol)
-        _currencySymbol.value = symbol
+        _currencySymbol.value = securityManager.getCurrency()
+        viewModelScope.launch {
+            _snackMessage.emit("Currency set to ${_currencySymbol.value}")
+        }
     }
 
     fun setStoreName(name: String) {
         securityManager.setStoreName(name)
         _storeName.value = securityManager.getStoreName()
         viewModelScope.launch {
-            _snackMessage.emit("Store name updated!")
+            _snackMessage.emit("Store renamed to '${_storeName.value}'")
         }
     }
 
     fun setDailyTarget(target: Double) {
         securityManager.setDailyTargetProfit(target)
-        _dailyTargetProfit.value = target
+        _dailyTargetProfit.value = securityManager.getDailyTargetProfit()
         viewModelScope.launch {
-            _snackMessage.emit("Daily profit goal set to ${_currencySymbol.value}${String.format("%.2f", target)}")
+            _snackMessage.emit("Daily goal updated to ${_currencySymbol.value}${_dailyTargetProfit.value.toInt()}")
+        }
+    }
+
+    fun setAutoLockEnabled(enabled: Boolean) {
+        securityManager.setAutoLockEnabled(enabled)
+        _isAutoLockEnabled.value = securityManager.isAutoLockEnabled()
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        securityManager.setHapticsEnabled(enabled)
+        _isHapticsEnabled.value = securityManager.isHapticsEnabled()
+    }
+
+    fun suppressAutoLockOnce() {
+        suppressNextAutoLock = true
+    }
+
+    fun onAppBackgrounded() {
+        if (suppressNextAutoLock) {
+            suppressNextAutoLock = false
+            return
+        }
+        if (_isPinEnabled.value && _isAutoLockEnabled.value) {
+            _isUnlocked.value = false
         }
     }
 
@@ -318,13 +362,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun lockApp() {
-        if (securityManager.isPinEnabled()) {
+        if (_isPinEnabled.value) {
             _isUnlocked.value = false
         }
     }
 
     fun resetPinSecurity() {
         securityManager.removePin()
+        _isPinEnabled.value = false
+        _isBiometricEnabled.value = false
         _isUnlocked.value = true
         viewModelScope.launch {
             _snackMessage.emit("PIN reset. Security turned off.")
@@ -333,14 +379,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setupNewPin(pin: String) {
         securityManager.setPin(pin)
+        _isPinEnabled.value = true
         _isUnlocked.value = true
         viewModelScope.launch {
-            _snackMessage.emit("PIN lock activated successfully!")
+            _snackMessage.emit("4-digit PIN lock activated!")
         }
     }
 
     fun removePinSecurity() {
         securityManager.removePin()
+        _isPinEnabled.value = false
+        _isBiometricEnabled.value = false
         _isUnlocked.value = true
         viewModelScope.launch {
             _snackMessage.emit("PIN lock disabled")
@@ -348,48 +397,140 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setBiometricEnabled(enabled: Boolean) {
+        if (enabled && !securityManager.canUseBiometrics()) {
+            viewModelScope.launch {
+                _snackMessage.emit(securityManager.getBiometricStatusMessage())
+            }
+            return
+        }
         securityManager.setBiometricEnabled(enabled)
+        _isBiometricEnabled.value = securityManager.isBiometricEnabled()
+        viewModelScope.launch {
+            _snackMessage.emit(if (_isBiometricEnabled.value) "Biometric unlock enabled" else "Biometric unlock disabled")
+        }
     }
 
-    fun triggerBiometricAuth(activity: Activity) {
-        if (!securityManager.isBiometricEnabled()) return
+    fun triggerBiometricAuth(activity: Activity, isManualTest: Boolean = false) {
+        if (!isManualTest && !_isBiometricEnabled.value) return
         securityManager.triggerBiometricPrompt(
             activity = activity,
             onSuccess = {
                 _isUnlocked.value = true
                 viewModelScope.launch {
-                    _snackMessage.emit("Unlocked via Biometrics!")
+                    _snackMessage.emit(if (isManualTest) "Biometric verification passed!" else "Unlocked with Biometrics")
                 }
             },
             onError = { err ->
-                // Biometrics error/cancellation reported gracefully
+                if (isManualTest || err.contains("unavailable", ignoreCase = true) || err.contains("enrolled", ignoreCase = true)) {
+                    viewModelScope.launch {
+                        _snackMessage.emit(err)
+                    }
+                }
             }
         )
     }
 
-    suspend fun exportDataCsv(): String {
-        return repository.exportToCsv(allSales.value)
-    }
-
-    suspend fun exportDataJson(): String {
-        return repository.exportToJson(allSales.value)
-    }
-
-    fun importCsv(content: String, onComplete: (Int) -> Unit) {
+    // Real File-Based Streaming Exports & Imports
+    fun saveExportToUri(uri: Uri, isCsv: Boolean) {
         viewModelScope.launch {
-            val result = repository.importFromCsv(content)
-            val count = result.getOrDefault(0)
-            _snackMessage.emit("Imported $count sales successfully")
-            onComplete(count)
+            val app = getApplication<Application>()
+            val sales = allSales.value
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    app.contentResolver.openOutputStream(uri)?.use { os ->
+                        if (isCsv) {
+                            repository.exportToCsvStream(sales, os).getOrThrow()
+                        } else {
+                            repository.exportToJsonStream(sales, os).getOrThrow()
+                        }
+                    } ?: throw IllegalStateException("Could not open file destination")
+                }
+            }
+            result.onSuccess { count ->
+                val ext = if (isCsv) "CSV" else "JSON"
+                _snackMessage.emit("Saved $count sales to $ext file!")
+            }.onFailure { err ->
+                _snackMessage.emit("Export failed: ${err.localizedMessage ?: "Write error"}")
+            }
         }
     }
 
-    fun importJson(content: String, onComplete: (Int) -> Unit) {
+    fun createShareFileIntent(isCsv: Boolean, onIntentReady: (Intent) -> Unit) {
         viewModelScope.launch {
-            val result = repository.importFromJson(content)
-            val count = result.getOrDefault(0)
-            _snackMessage.emit("Imported $count sales successfully")
-            onComplete(count)
+            val app = getApplication<Application>()
+            val sales = allSales.value
+            val dateStamp = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(Date())
+            val ext = if (isCsv) "csv" else "json"
+            val mimeType = if (isCsv) "text/csv" else "application/json"
+            val fileName = "Hisab_Sales_$dateStamp.$ext"
+
+            val fileResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exportDir = File(app.cacheDir, "exports").apply { mkdirs() }
+                    // Clean old cached exports
+                    exportDir.listFiles()?.forEach { it.delete() }
+                    val file = File(exportDir, fileName)
+                    FileOutputStream(file).use { fos ->
+                        if (isCsv) {
+                            repository.exportToCsvStream(sales, fos).getOrThrow()
+                        } else {
+                            repository.exportToJsonStream(sales, fos).getOrThrow()
+                        }
+                    }
+                    FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+                }
+            }
+
+            fileResult.onSuccess { uri ->
+                suppressAutoLockOnce()
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = mimeType
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Hisab Store Backup ($fileName)")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                onIntentReady(Intent.createChooser(shareIntent, "Share $ext Backup File"))
+            }.onFailure { err ->
+                _snackMessage.emit("Could not create export file: ${err.localizedMessage}")
+            }
+        }
+    }
+
+    fun importFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val fileName = uri.lastPathSegment ?: ""
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    app.contentResolver.openInputStream(uri)?.use { input ->
+                        repository.importFromStream(input, fileName).getOrThrow()
+                    } ?: throw IllegalStateException("Could not open selected file")
+                }
+            }
+            result.onSuccess { count ->
+                if (count > 0) {
+                    _snackMessage.emit("Imported $count sales from file!")
+                } else {
+                    _snackMessage.emit("No valid sales records found in file")
+                }
+            }.onFailure { err ->
+                _snackMessage.emit("Import failed: ${err.localizedMessage ?: "Invalid file format"}")
+            }
+        }
+    }
+
+    fun importFromText(rawContent: String, isCsv: Boolean) {
+        viewModelScope.launch {
+            val result = if (isCsv) {
+                repository.importFromCsv(rawContent)
+            } else {
+                repository.importFromJson(rawContent)
+            }
+            result.onSuccess { count ->
+                _snackMessage.emit("Imported $count sales successfully")
+            }.onFailure { err ->
+                _snackMessage.emit("Import failed: ${err.localizedMessage ?: "Invalid syntax"}")
+            }
         }
     }
 }

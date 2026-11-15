@@ -1,6 +1,5 @@
 package com.example.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -27,7 +26,7 @@ private val HisabLightColorScheme = lightColorScheme(
     surfaceVariant = SurfaceSubtle,
     onSurfaceVariant = TextSecondary,
     outline = BorderSubtle,
-    outlineVariant = BorderSubtle
+    outlineVariant = BorderHairline
 )
 
 private val HisabDarkColorScheme = darkColorScheme(
@@ -52,8 +51,8 @@ private val HisabDarkColorScheme = darkColorScheme(
 
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = false, // Default to stunning light theme requested by user
-    dynamicColor: Boolean = false, // Keep cohesive custom brand aesthetic
+    darkTheme: Boolean = false,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) HisabDarkColorScheme else HisabLightColorScheme

@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 // Brand Core Colors
 val BrandDark = Color(0xFF0B192C)
-val BrandNavy = Color(0xFF1E3E62)
+val BrandNavy = Color(0xFF173252)
 val BrandSlate = Color(0xFF334155)
 val BrandSlateLight = Color(0xFF64748B)
 
@@ -28,12 +28,16 @@ val LossRose = Color(0xFFE11D48)
 val LossRoseBg = Color(0xFFFFF1F2)
 val LossRoseBorder = Color(0xFFFECDD3)
 
-// Modern Light Backgrounds & Surfaces
-val BackgroundLight = Color(0xFFF8FAFC)
+val AccentViolet = Color(0xFF7C3AED)
+val AccentVioletBg = Color(0xFFF5F3FF)
+
+// Modern Atmospheric Light Backgrounds & Surfaces
+val BackgroundLight = Color(0xFFF3F6FB)
 val SurfaceWhite = Color(0xFFFFFFFF)
-val SurfaceSubtle = Color(0xFFF1F5F9)
+val SurfaceSubtle = Color(0xFFEFF3F9)
 val SurfaceCard = Color(0xFFFFFFFF)
 val BorderSubtle = Color(0xFFE2E8F0)
+val BorderHairline = Color(0xFFE6ECF5)
 val TextPrimary = Color(0xFF0F172A)
 val TextSecondary = Color(0xFF475569)
 val TextMuted = Color(0xFF94A3B8)

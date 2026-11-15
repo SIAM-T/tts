@@ -25,6 +25,13 @@ data class DailySummary(
     val salesCount: Int
 )
 
+data class TimeOfDayStat(
+    val periodLabel: String,
+    val revenue: Double,
+    val profit: Double,
+    val count: Int
+)
+
 data class MarginHealthBreakdown(
     val highMarginCount: Int, // > 35%
     val moderateMarginCount: Int, // 15% - 35%
@@ -39,11 +46,13 @@ data class SalesAnalyticsReport(
     val overallMarginPercent: Double,
     val markupPercent: Double,
     val salesCount: Int,
+    val transactionCount: Int,
     val averageTicketSize: Double,
     val averageProfitPerSale: Double,
     val topProfitableProducts: List<ProductStat>,
     val topRevenueProducts: List<ProductStat>,
     val dailyTrend: List<DailySummary>,
+    val timeOfDayStats: List<TimeOfDayStat>,
     val marginHealth: MarginHealthBreakdown,
     val highestProfitSale: SaleEntity?,
     val lowestProfitSale: SaleEntity?
@@ -60,11 +69,13 @@ object AnalyticsEngine {
                 overallMarginPercent = 0.0,
                 markupPercent = 0.0,
                 salesCount = 0,
+                transactionCount = 0,
                 averageTicketSize = 0.0,
                 averageProfitPerSale = 0.0,
                 topProfitableProducts = emptyList(),
                 topRevenueProducts = emptyList(),
                 dailyTrend = emptyList(),
+                timeOfDayStats = emptyList(),
                 marginHealth = MarginHealthBreakdown(0, 0, 0, 0),
                 highestProfitSale = null,
                 lowestProfitSale = null
@@ -74,13 +85,14 @@ object AnalyticsEngine {
         val totalRev = sales.sumOf { it.price * it.quantity }
         val totalCost = sales.sumOf { it.cost * it.quantity }
         val netProfit = totalRev - totalCost
-        val count = sales.sumOf { it.quantity }
+        val unitCount = sales.sumOf { it.quantity }
+        val txCount = sales.size
         val overallMargin = if (totalRev > 0) (netProfit / totalRev) * 100.0 else 0.0
         val markup = if (totalCost > 0) (netProfit / totalCost) * 100.0 else 0.0
-        val avgTicket = if (count > 0) totalRev / count else 0.0
-        val avgProfit = if (count > 0) netProfit / count else 0.0
+        val avgTicket = if (txCount > 0) totalRev / txCount else 0.0
+        val avgProfit = if (txCount > 0) netProfit / txCount else 0.0
 
-        // Margin health
+        // Margin health (counted by transaction)
         var high = 0
         var mod = 0
         var low = 0
@@ -141,9 +153,37 @@ object AnalyticsEngine {
                 totalCost = dCost,
                 netProfit = dProf,
                 marginPercent = dMargin,
-                salesCount = daySales.sumOf { it.quantity }
+                salesCount = daySales.size
             )
         }.sortedBy { it.dateTimestamp }
+
+        // Time of day breakdown (Morning, Afternoon, Evening, Night)
+        val buckets = linkedMapOf(
+            "Morning (5a-12p)" to mutableListOf<SaleEntity>(),
+            "Afternoon (12p-5p)" to mutableListOf<SaleEntity>(),
+            "Evening (5p-9p)" to mutableListOf<SaleEntity>(),
+            "Night (9p-5a)" to mutableListOf<SaleEntity>()
+        )
+        sales.forEach { s ->
+            val hour = Calendar.getInstance().apply { timeInMillis = s.timestamp }.get(Calendar.HOUR_OF_DAY)
+            val key = when (hour) {
+                in 5..11 -> "Morning (5a-12p)"
+                in 12..16 -> "Afternoon (12p-5p)"
+                in 17..20 -> "Evening (5p-9p)"
+                else -> "Night (9p-5a)"
+            }
+            buckets[key]?.add(s)
+        }
+        val timeOfDayStats = buckets.map { (label, items) ->
+            val rev = items.sumOf { it.price * it.quantity }
+            val prof = items.sumOf { (it.price - it.cost) * it.quantity }
+            TimeOfDayStat(
+                periodLabel = label,
+                revenue = rev,
+                profit = prof,
+                count = items.size
+            )
+        }
 
         val highestSale = sales.maxByOrNull { it.profit }
         val lowestSale = sales.minByOrNull { it.profit }
@@ -154,12 +194,14 @@ object AnalyticsEngine {
             netProfit = netProfit,
             overallMarginPercent = overallMargin,
             markupPercent = markup,
-            salesCount = count,
+            salesCount = unitCount,
+            transactionCount = txCount,
             averageTicketSize = avgTicket,
             averageProfitPerSale = avgProfit,
             topProfitableProducts = topProfitable,
             topRevenueProducts = topRevenue,
             dailyTrend = dailyTrend,
+            timeOfDayStats = timeOfDayStats,
             marginHealth = MarginHealthBreakdown(high, mod, low, loss),
             highestProfitSale = highestSale,
             lowestProfitSale = lowestSale

@@ -14,20 +14,22 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -43,52 +45,58 @@ import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.PointOfSale
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
 import com.example.ui.components.PinLockScreen
+import com.example.ui.components.ambientFinancialBackdrop
+import com.example.ui.components.performHapticTap
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.QuickSaleScreen
 import com.example.ui.screens.SalesLogScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.theme.BackgroundLight
-import com.example.ui.theme.BorderSubtle
+import com.example.ui.theme.BorderHairline
 import com.example.ui.theme.BrandDark
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.ProfitEmerald
-import com.example.ui.theme.RevenueSapphire
+import com.example.ui.theme.ProfitEmeraldBg
 import com.example.ui.theme.SurfaceSubtle
 import com.example.ui.theme.SurfaceWhite
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 
 enum class AppTab(val label: String, val activeIcon: ImageVector, val inactiveIcon: ImageVector) {
     QUICK_SALE("Quick Sale", Icons.Filled.PointOfSale, Icons.Outlined.PointOfSale),
@@ -101,17 +109,24 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
             MyApplicationTheme {
+                val context = LocalContext.current
+
+                // Reactive StateFlows
                 val isUnlocked by viewModel.isUnlocked.collectAsStateWithLifecycle()
+                val isPinEnabled by viewModel.isPinEnabled.collectAsStateWithLifecycle()
+                val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsStateWithLifecycle()
+                val isAutoLockEnabled by viewModel.isAutoLockEnabled.collectAsStateWithLifecycle()
+                val isHapticsEnabled by viewModel.isHapticsEnabled.collectAsStateWithLifecycle()
                 val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
                 val storeName by viewModel.storeName.collectAsStateWithLifecycle()
                 val dailyTargetProfit by viewModel.dailyTargetProfit.collectAsStateWithLifecycle()
+
                 val todaySummary by viewModel.todaySummary.collectAsStateWithLifecycle()
                 val allSales by viewModel.allSales.collectAsStateWithLifecycle()
                 val recentTitles by viewModel.recentTitles.collectAsStateWithLifecycle()
@@ -125,155 +140,206 @@ class MainActivity : ComponentActivity() {
 
                 var currentTab by remember { mutableStateOf(AppTab.QUICK_SALE) }
                 val snackbarHostState = remember { SnackbarHostState() }
-                val scope = rememberCoroutineScope()
 
-                // Listen to ViewModel snackbar events
+                // Background auto-lock observer (respects suppressAutoLockOnce for system file pickers)
+                LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+                    viewModel.onAppBackgrounded()
+                }
+
                 LaunchedEffect(Unit) {
                     viewModel.snackMessage.collectLatest { msg ->
                         snackbarHostState.showSnackbar(msg)
                     }
                 }
 
-                // If locked, show full-screen PinLockScreen
                 if (!isUnlocked) {
-                    // Try triggering biometric prompt if enabled
-                    LaunchedEffect(Unit) {
-                        viewModel.triggerBiometricAuth(this@MainActivity)
+                    LaunchedEffect(isUnlocked, isBiometricEnabled) {
+                        if (!isUnlocked && isBiometricEnabled) {
+                            viewModel.triggerBiometricAuth(this@MainActivity, isManualTest = false)
+                        }
                     }
 
                     PinLockScreen(
-                        title = "Hisab Security",
-                        subtitle = "Enter 4-digit PIN to access store sales",
-                        showBiometricButton = viewModel.securityManager.isBiometricEnabled(),
-                        onPinComplete = { pin ->
-                            viewModel.unlockWithPin(pin)
-                        },
+                        title = storeName,
+                        subtitle = "Enter 4-digit PIN to access store ledger",
+                        showBiometricButton = isBiometricEnabled && viewModel.securityManager.canUseBiometrics(),
+                        hapticsEnabled = isHapticsEnabled,
+                        onPinComplete = { pin -> viewModel.unlockWithPin(pin) },
                         onBiometricClick = {
-                            viewModel.triggerBiometricAuth(this@MainActivity)
+                            viewModel.triggerBiometricAuth(this@MainActivity, isManualTest = false)
                         },
-                        onForgotPin = {
-                            viewModel.resetPinSecurity()
-                        }
+                        onForgotPin = { viewModel.resetPinSecurity() }
                     )
                 } else {
-                    // Back handler: return to Quick Sale tab if on another tab
                     BackHandler(enabled = currentTab != AppTab.QUICK_SALE) {
                         currentTab = AppTab.QUICK_SALE
                     }
 
-                    Scaffold(
-                        snackbarHost = { SnackbarHost(snackbarHostState) },
-                        contentWindowInsets = WindowInsets.statusBars,
-                        topBar = {
-                            HisabTopBar(
-                                currentTab = currentTab,
-                                storeName = storeName,
-                                isPinEnabled = viewModel.securityManager.isPinEnabled(),
-                                onLockClick = { viewModel.lockApp() }
-                            )
-                        },
-                        bottomBar = {
-                            HisabBottomNavigationBar(
-                                currentTab = currentTab,
-                                onTabSelected = { currentTab = it }
-                            )
-                        },
-                        containerColor = BackgroundLight,
-                        modifier = Modifier.fillMaxSize()
-                    ) { innerPadding ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                        ) {
-                            AnimatedContent(
-                                targetState = currentTab,
-                                transitionSpec = {
-                                    if (targetState.ordinal > initialState.ordinal) {
-                                        (slideInHorizontally { width -> width / 3 } + fadeIn())
-                                            .togetherWith(slideOutHorizontally { width -> -width / 3 } + fadeOut())
-                                    } else {
-                                        (slideInHorizontally { width -> -width / 3 } + fadeIn())
-                                            .togetherWith(slideOutHorizontally { width -> width / 3 } + fadeOut())
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .ambientFinancialBackdrop()
+                    ) {
+                        val useNavRail = maxWidth >= 600.dp
+
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            if (useNavRail) {
+                                HisabNavigationRail(
+                                    currentTab = currentTab,
+                                    onTabSelected = {
+                                        performHapticTap(context, isHapticsEnabled)
+                                        currentTab = it
                                     }
+                                )
+                                VerticalDivider(color = BorderHairline)
+                            }
+
+                            Scaffold(
+                                snackbarHost = { SnackbarHost(snackbarHostState) },
+                                contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
+                                topBar = {
+                                    HisabTopBar(
+                                        currentTab = currentTab,
+                                        storeName = storeName,
+                                        isPinEnabled = isPinEnabled,
+                                        onLockClick = {
+                                            performHapticTap(context, isHapticsEnabled)
+                                            viewModel.lockApp()
+                                        }
+                                    )
                                 },
-                                label = "tab_transition"
-                            ) { tab ->
-                                when (tab) {
-                                    AppTab.QUICK_SALE -> {
-                                        QuickSaleScreen(
-                                            todaySummary = todaySummary,
-                                            recentSales = allSales,
-                                            recentTitles = recentTitles,
-                                            currencySymbol = currencySymbol,
-                                            storeName = storeName,
-                                            dailyTargetProfit = dailyTargetProfit,
-                                            onRecordSale = { title, price, cost, quantity ->
-                                                viewModel.recordSale(title, price, cost, quantity)
-                                            },
-                                            onDuplicateSale = { sale ->
-                                                viewModel.duplicateSale(sale)
-                                            },
-                                            onDeleteSale = { sale ->
-                                                viewModel.deleteSale(sale)
-                                            },
-                                            onNavigateToLog = {
-                                                currentTab = AppTab.SALES_LOG
+                                bottomBar = {
+                                    if (!useNavRail) {
+                                        HisabBottomNavigationBar(
+                                            currentTab = currentTab,
+                                            onTabSelected = {
+                                                performHapticTap(context, isHapticsEnabled)
+                                                currentTab = it
                                             }
                                         )
                                     }
-
-                                    AppTab.SALES_LOG -> {
-                                        SalesLogScreen(
-                                            sales = filteredSales,
-                                            timeFilter = timeFilter,
-                                            marginFilter = marginFilter,
-                                            sortOrder = sortOrder,
-                                            searchQuery = searchQuery,
-                                            selectedSpecificDateMillis = selectedSpecificDateMillis,
-                                            currencySymbol = currencySymbol,
-                                            onTimeFilterChange = { viewModel.setTimeFilter(it) },
-                                            onMarginFilterChange = { viewModel.setMarginFilter(it) },
-                                            onSortOrderChange = { viewModel.setSortOrder(it) },
-                                            onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                                            onSelectSpecificDate = { viewModel.setSelectedSpecificDate(it) },
-                                            onDuplicateSale = { viewModel.duplicateSale(it) },
-                                            onUpdateSale = { viewModel.updateSale(it) },
-                                            onDeleteSale = { viewModel.deleteSale(it) }
+                                },
+                                containerColor = Color.Transparent,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) { innerPadding ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(innerPadding)
+                                        .then(
+                                            if (useNavRail) {
+                                                Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                                            } else {
+                                                Modifier
+                                            }
                                         )
-                                    }
+                                ) {
+                                    AnimatedContent(
+                                        targetState = currentTab,
+                                        transitionSpec = {
+                                            if (targetState.ordinal > initialState.ordinal) {
+                                                (slideInHorizontally { width -> width / 4 } + fadeIn())
+                                                    .togetherWith(slideOutHorizontally { width -> -width / 4 } + fadeOut())
+                                            } else {
+                                                (slideInHorizontally { width -> -width / 4 } + fadeIn())
+                                                    .togetherWith(slideOutHorizontally { width -> width / 4 } + fadeOut())
+                                            }
+                                        },
+                                        label = "tab_transition"
+                                    ) { tab ->
+                                        when (tab) {
+                                            AppTab.QUICK_SALE -> {
+                                                QuickSaleScreen(
+                                                    todaySummary = todaySummary,
+                                                    recentSales = allSales,
+                                                    recentTitles = recentTitles,
+                                                    currencySymbol = currencySymbol,
+                                                    storeName = storeName,
+                                                    dailyTargetProfit = dailyTargetProfit,
+                                                    hapticsEnabled = isHapticsEnabled,
+                                                    onRecordSale = { title, price, cost, quantity ->
+                                                        viewModel.recordSale(title, price, cost, quantity)
+                                                    },
+                                                    onDuplicateSale = { viewModel.duplicateSale(it) },
+                                                    onDeleteSale = { viewModel.deleteSale(it) },
+                                                    onNavigateToLog = { currentTab = AppTab.SALES_LOG }
+                                                )
+                                            }
 
-                                    AppTab.ANALYTICS -> {
-                                        AnalyticsScreen(
-                                            report = analyticsReport,
-                                            timeFilter = timeFilter,
-                                            currencySymbol = currencySymbol,
-                                            onTimeFilterChange = { viewModel.setTimeFilter(it) }
-                                        )
-                                    }
+                                            AppTab.SALES_LOG -> {
+                                                SalesLogScreen(
+                                                    sales = filteredSales,
+                                                    timeFilter = timeFilter,
+                                                    marginFilter = marginFilter,
+                                                    sortOrder = sortOrder,
+                                                    searchQuery = searchQuery,
+                                                    selectedSpecificDateMillis = selectedSpecificDateMillis,
+                                                    currencySymbol = currencySymbol,
+                                                    hapticsEnabled = isHapticsEnabled,
+                                                    onTimeFilterChange = { viewModel.setTimeFilter(it) },
+                                                    onMarginFilterChange = { viewModel.setMarginFilter(it) },
+                                                    onSortOrderChange = { viewModel.setSortOrder(it) },
+                                                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                                                    onSelectSpecificDate = { viewModel.setSelectedSpecificDate(it) },
+                                                    onDuplicateSale = { viewModel.duplicateSale(it) },
+                                                    onUpdateSale = { viewModel.updateSale(it) },
+                                                    onDeleteSale = { viewModel.deleteSale(it) }
+                                                )
+                                            }
 
-                                    AppTab.SETTINGS -> {
-                                        SettingsScreen(
-                                            isPinEnabled = viewModel.securityManager.isPinEnabled(),
-                                            isBiometricEnabled = viewModel.securityManager.isBiometricEnabled(),
-                                            canUseBiometrics = viewModel.securityManager.canUseBiometrics(),
-                                            currentCurrency = currencySymbol,
-                                            storeName = storeName,
-                                            dailyTargetProfit = dailyTargetProfit,
-                                            onSetupPin = { viewModel.setupNewPin(it) },
-                                            onDisablePin = { viewModel.removePinSecurity() },
-                                            onToggleBiometric = { viewModel.setBiometricEnabled(it) },
-                                            onSelectCurrency = { viewModel.setCurrency(it) },
-                                            onUpdateStoreName = { viewModel.setStoreName(it) },
-                                            onUpdateDailyTarget = { viewModel.setDailyTarget(it) },
-                                            onTestBiometrics = { viewModel.triggerBiometricAuth(this@MainActivity) },
-                                            onExportCsv = { viewModel.exportDataCsv() },
-                                            onExportJson = { viewModel.exportDataJson() },
-                                            onImportCsv = { raw -> viewModel.importCsv(raw) {} },
-                                            onImportJson = { raw -> viewModel.importJson(raw) {} },
-                                            onSeedSampleData = { viewModel.seedSampleData() },
-                                            onClearAllData = { viewModel.clearAllSales() }
-                                        )
+                                            AppTab.ANALYTICS -> {
+                                                AnalyticsScreen(
+                                                    report = analyticsReport,
+                                                    timeFilter = timeFilter,
+                                                    selectedSpecificDateMillis = selectedSpecificDateMillis,
+                                                    currencySymbol = currencySymbol,
+                                                    dailyTargetProfit = dailyTargetProfit,
+                                                    hapticsEnabled = isHapticsEnabled,
+                                                    onTimeFilterChange = { viewModel.setTimeFilter(it) },
+                                                    onSelectSpecificDate = { viewModel.setSelectedSpecificDate(it) }
+                                                )
+                                            }
+
+                                            AppTab.SETTINGS -> {
+                                                SettingsScreen(
+                                                    isPinEnabled = isPinEnabled,
+                                                    isBiometricEnabled = isBiometricEnabled,
+                                                    isAutoLockEnabled = isAutoLockEnabled,
+                                                    isHapticsEnabled = isHapticsEnabled,
+                                                    canUseBiometrics = viewModel.securityManager.canUseBiometrics(),
+                                                    biometricStatusText = viewModel.securityManager.getBiometricStatusMessage(),
+                                                    currentCurrency = currencySymbol,
+                                                    storeName = storeName,
+                                                    dailyTargetProfit = dailyTargetProfit,
+                                                    salesCount = allSales.size,
+                                                    onSetupPin = { viewModel.setupNewPin(it) },
+                                                    onDisablePin = { viewModel.removePinSecurity() },
+                                                    onToggleBiometric = { viewModel.setBiometricEnabled(it) },
+                                                    onToggleAutoLock = { viewModel.setAutoLockEnabled(it) },
+                                                    onToggleHaptics = { viewModel.setHapticsEnabled(it) },
+                                                    onSelectCurrency = { viewModel.setCurrency(it) },
+                                                    onUpdateStoreName = { viewModel.setStoreName(it) },
+                                                    onUpdateDailyTarget = { viewModel.setDailyTarget(it) },
+                                                    onTestBiometrics = {
+                                                        viewModel.triggerBiometricAuth(this@MainActivity, isManualTest = true)
+                                                    },
+                                                    onSuppressAutoLock = { viewModel.suppressAutoLockOnce() },
+                                                    onSaveCsvToUri = { uri -> viewModel.saveExportToUri(uri, isCsv = true) },
+                                                    onSaveJsonToUri = { uri -> viewModel.saveExportToUri(uri, isCsv = false) },
+                                                    onShareFile = { isCsv ->
+                                                        viewModel.createShareFileIntent(isCsv) { intent ->
+                                                            startActivity(intent)
+                                                        }
+                                                    },
+                                                    onImportFromUri = { uri -> viewModel.importFromUri(uri) },
+                                                    onImportText = { raw, isCsv -> viewModel.importFromText(raw, isCsv) },
+                                                    onSeedSampleData = { viewModel.seedSampleData() },
+                                                    onClearAllData = { viewModel.clearAllSales() }
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -292,20 +358,23 @@ fun HisabTopBar(
     isPinEnabled: Boolean,
     onLockClick: () -> Unit
 ) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceWhite)
-            .border(0.dp, BorderSubtle)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .background(SurfaceWhite.copy(alpha = 0.94f))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // App Emblem
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 Box(
                     modifier = Modifier
                         .size(38.dp)
@@ -317,11 +386,11 @@ fun HisabTopBar(
                         imageVector = Icons.AutoMirrored.Filled.TrendingUp,
                         contentDescription = null,
                         tint = ProfitEmerald,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(21.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(10.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Hisab",
@@ -333,7 +402,7 @@ fun HisabTopBar(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(ProfitEmerald.copy(alpha = 0.15f))
+                                .background(ProfitEmeraldBg)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
@@ -348,18 +417,22 @@ fun HisabTopBar(
                         text = "$storeName • ${currentTab.label}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
             if (isPinEnabled) {
+                Spacer(modifier = Modifier.width(8.dp))
                 IconButton(
                     onClick = onLockClick,
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
                         .background(SurfaceSubtle)
+                        .border(1.dp, BorderHairline, CircleShape)
                         .testTag("lock_app_button")
                 ) {
                     Icon(
@@ -371,6 +444,12 @@ fun HisabTopBar(
                 }
             }
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BorderHairline)
+                .size(1.dp)
+        )
     }
 }
 
@@ -381,10 +460,10 @@ fun HisabBottomNavigationBar(
 ) {
     NavigationBar(
         containerColor = SurfaceWhite,
-        tonalElevation = 2.dp,
+        tonalElevation = 0.dp,
         modifier = Modifier
+            .border(1.dp, BorderHairline)
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .border(1.dp, BorderSubtle)
             .testTag("bottom_nav_bar")
     ) {
         AppTab.entries.forEach { tab ->
@@ -403,7 +482,8 @@ fun HisabBottomNavigationBar(
                     Text(
                         text = tab.label,
                         fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
@@ -416,5 +496,49 @@ fun HisabBottomNavigationBar(
                 modifier = Modifier.testTag("nav_item_${tab.name.lowercase()}")
             )
         }
+    }
+}
+
+@Composable
+fun HisabNavigationRail(
+    currentTab: AppTab,
+    onTabSelected: (AppTab) -> Unit
+) {
+    NavigationRail(
+        containerColor = SurfaceWhite,
+        windowInsets = WindowInsets.statusBars.union(WindowInsets.navigationBars),
+        modifier = Modifier.testTag("nav_rail")
+    ) {
+        Spacer(modifier = Modifier.weight(1f))
+        AppTab.entries.forEach { tab ->
+            val isSelected = currentTab == tab
+            NavigationRailItem(
+                selected = isSelected,
+                onClick = { onTabSelected(tab) },
+                icon = {
+                    Icon(
+                        imageVector = if (isSelected) tab.activeIcon else tab.inactiveIcon,
+                        contentDescription = tab.label,
+                        modifier = Modifier.size(22.dp)
+                    )
+                },
+                label = {
+                    Text(
+                        text = tab.label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = BrandDark,
+                    selectedTextColor = BrandDark,
+                    indicatorColor = SurfaceSubtle,
+                    unselectedIconColor = TextMuted,
+                    unselectedTextColor = TextMuted
+                ),
+                modifier = Modifier.testTag("rail_item_${tab.name.lowercase()}")
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
